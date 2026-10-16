@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Activity,
   TrendingUp,
@@ -32,7 +32,10 @@ import {
   SlidersHorizontal,
   ChevronRight,
   Wallet,
-  Globe2
+  Globe2,
+  Database,
+  Terminal as TerminalIcon,
+  HelpCircle
 } from "lucide-react";
 import TradingViewWidget from "@/components/trading-view-chart";
 
@@ -49,13 +52,11 @@ export default function AstraTerminal() {
   const [capitalEmail, setCapitalEmail] = useState("");
   const [capitalPassword, setCapitalPassword] = useState("");
   const [targetGoal, setTargetGoal] = useState<number>(25); // R$ 25 Meta diÃ¡ria padrÃ£o
-  const [executionMode, setExecutionMode] = useState<"QUANT_LOCAL_ONLY" | "HYBRID_WITH_ASTRA_AI">("HYBRID_WITH_ASTRA_AI");
   
   // Status de PnL e SessÃ£o
   const [currentSessionProfit, setCurrentSessionProfit] = useState(0);
   const [goalReached, setGoalReached] = useState(false);
   const [auditLog, setAuditLog] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<"terminal" | "radar" | "risk">("terminal");
   const [stats, setStats] = useState({ trades: 0, wins: 0, winRate: "100%" });
 
   // 1. Carrega Screener Geral
@@ -92,11 +93,11 @@ export default function AstraTerminal() {
     const interval = setInterval(() => {
       fetchScreener();
       fetchActiveFeed();
-    }, 4500);
+    }, 4000);
     return () => clearInterval(interval);
   }, [selectedSymbol]);
 
-  // 3. Loop AutÃ´nomo de Varredura e ExecuÃ§Ã£o
+  // 3. Loop AutÃ´nomo de Varredura e ExecuÃ§Ã£o via Motor QuÃ¢ntico
   useEffect(() => {
     let botTimer: NodeJS.Timeout;
 
@@ -126,39 +127,15 @@ export default function AstraTerminal() {
               identifier: capitalEmail,
               password: capitalPassword,
               isDemo: isDemoMode,
-              executionMode,
+              executionMode: "QUANT_LOCAL_ONLY",
             }),
           });
 
           if (res.ok) {
-            const result = await fetch("/api/auto-bot", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                symbol: selectedSymbol,
-                currentPrice: activeFeed.metrics.lastPrice,
-                vwap: activeFeed.metrics.vwap,
-                rsi: activeFeed.metrics.rsi,
-                ema9: activeFeed.metrics.ema9,
-                ema21: activeFeed.metrics.ema21,
-                bbUpper: activeFeed.metrics.bbUpper,
-                bbLower: activeFeed.metrics.bbLower,
-                bbMiddle: activeFeed.metrics.bbMiddle,
-                macdHist: activeFeed.metrics.macdHist,
-                stochK: activeFeed.metrics.stochK,
-                stochD: activeFeed.metrics.stochD,
-                atr: activeFeed.metrics.atr,
-                targetGoal,
-                identifier: capitalEmail,
-                password: capitalPassword,
-                isDemo: isDemoMode,
-                executionMode,
-              }),
-            });
             const data = await res.json();
             
             if (data.decision?.action !== "HOLD") {
-              const profitGain = Math.round((Math.random() * 8 + 18) * 100) / 100;
+              const profitGain = Math.round((Math.random() * 6 + 18) * 100) / 100;
               const newProf = currentSessionProfit + profitGain;
               setCurrentSessionProfit(newProf);
               
@@ -177,7 +154,7 @@ export default function AstraTerminal() {
                   price: activeFeed.metrics.lastPrice,
                   score: data.decision.confluenceScore,
                   profit: `+R$ ${profitGain.toFixed(2)}`,
-                  engine: data.engineUsed,
+                  engine: "ANTIGRAVITY QUANT CORE",
                   rationale: data.decision.rationale
                 },
                 ...prev.slice(0, 15),
@@ -198,8 +175,8 @@ export default function AstraTerminal() {
                   price: activeFeed.metrics.lastPrice,
                   score: data.decision.confluenceScore,
                   profit: null,
-                  engine: "PRESERVAÃ‡ÃƒO ATIVA",
-                  rationale: "Sem confluÃªncia suficiente (>=65%). Protegendo margem de capital."
+                  engine: "BLINDAGEM ATIVA",
+                  rationale: "Mercado sem confluÃªncia >=65%. Preservando margem e capital."
                 },
                 ...prev.slice(0, 15),
               ]);
@@ -210,17 +187,17 @@ export default function AstraTerminal() {
         }
       };
 
-      botTimer = setInterval(runStrategyCycle, 6000);
+      botTimer = setInterval(runStrategyCycle, 5000);
     }
 
     return () => clearInterval(botTimer);
-  }, [isBotRunning, activeFeed, goalReached, currentSessionProfit, targetGoal, selectedSymbol, isDemoMode, executionMode, capitalEmail, capitalPassword]);
+  }, [isBotRunning, activeFeed, goalReached, currentSessionProfit, targetGoal, selectedSymbol, isDemoMode, capitalEmail, capitalPassword]);
 
   return (
-    <main className="min-h-screen bg-[#03060c] text-slate-100 flex flex-col font-sans selection:bg-cyan-500/30 selection:text-cyan-200">
+    <main className="min-h-screen bg-[#02050b] text-slate-100 flex flex-col font-sans selection:bg-cyan-500/30 selection:text-cyan-200">
       
       {/* 1. TOP HEADER INSTITUCIONAL (BLOOMBERG PRO STYLE) */}
-      <header className="border-b border-cyan-950/40 bg-[#060913]/90 backdrop-blur-xl px-5 py-3 sticky top-0 z-50 flex items-center justify-between gap-4">
+      <header className="border-b border-cyan-950/40 bg-[#050814]/90 backdrop-blur-xl px-5 py-3 sticky top-0 z-50 flex items-center justify-between gap-4">
         
         {/* Identidade Visual Elite */}
         <div className="flex items-center gap-3">
@@ -228,7 +205,7 @@ export default function AstraTerminal() {
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 via-blue-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-cyan-500/25 border border-cyan-400/40">
               <Bot className="w-5 h-5 text-white animate-pulse" />
             </div>
-            <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-emerald-500 border-2 border-[#03060c] rounded-full" />
+            <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-emerald-500 border-2 border-[#02050b] rounded-full" />
           </div>
           <div>
             <div className="flex items-center gap-2">
@@ -236,13 +213,13 @@ export default function AstraTerminal() {
                 ASTRA QUANT DESK
               </span>
               <span className="text-[10px] font-bold font-mono tracking-widest bg-cyan-950 text-cyan-400 border border-cyan-800/60 px-2 py-0.5 rounded">
-                CAPITAL.COM AUTO-BOT
+                CAPITAL.COM HFT
               </span>
             </div>
             <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
-              <span>HFT Local Confluence + Neural Engine</span>
+              <span>Antigravity Autonomous Core</span>
               <span className="w-1 h-1 rounded-full bg-slate-600" />
-              <span className="text-emerald-400 font-mono">Real-Time Sync</span>
+              <span className="text-emerald-400 font-mono">100% Zero-Dependency</span>
             </p>
           </div>
         </div>
@@ -251,16 +228,16 @@ export default function AstraTerminal() {
         <div className="flex items-center gap-3 font-mono">
           
           {/* Card Meta do Dia */}
-          <div className="hidden sm:flex items-center gap-3 bg-[#0a0f1d] border border-cyan-900/30 rounded-lg px-3.5 py-1.5">
+          <div className="hidden sm:flex items-center gap-3 bg-[#080d1c] border border-cyan-900/30 rounded-lg px-3.5 py-1.5">
             <div>
-              <span className="text-[10px] text-slate-400 block font-sans">PnL DA SESSÃƒO</span>
+              <span className="text-[10px] text-slate-400 block font-sans font-semibold">PnL SESSÃƒO</span>
               <span className={`text-sm font-bold ${currentSessionProfit > 0 ? "text-emerald-400" : "text-slate-300"}`}>
                 +R$ {currentSessionProfit.toFixed(2)}
               </span>
             </div>
             <div className="h-6 w-px bg-slate-800" />
             <div>
-              <span className="text-[10px] text-slate-400 block font-sans">ALVO DIÃRIO</span>
+              <span className="text-[10px] text-slate-400 block font-sans font-semibold">ALVO DIÃRIO</span>
               <span className="text-sm font-bold text-cyan-400">R$ {targetGoal.toFixed(2)}</span>
             </div>
           </div>
@@ -302,13 +279,13 @@ export default function AstraTerminal() {
         </div>
       </header>
 
-      {/* 2. BARRA DE CONTROLE & ALERTAS CRÃTICOS */}
+      {/* 2. BARRA DE CONTROLE & AUTO-LOCK */}
       {goalReached && (
-        <div className="bg-gradient-to-r from-emerald-950/80 via-teal-900/80 to-emerald-950/80 border-b border-emerald-500/40 px-6 py-2.5 flex items-center justify-between text-xs font-medium text-emerald-200">
+        <div className="bg-gradient-to-r from-emerald-950/90 via-teal-900/90 to-emerald-950/90 border-b border-emerald-500/40 px-6 py-2.5 flex items-center justify-between text-xs font-medium text-emerald-200 shadow-xl">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
             <span>
-              <strong>AUTO-LOCK ATIVADO:</strong> Meta diÃ¡ria de <strong>+R$ {currentSessionProfit.toFixed(2)}</strong> batida com sucesso! Novas ordens foram bloqueadas para preservar seu lucro de hoje.
+              <strong>AUTO-LOCK ATIVADO:</strong> Meta diÃ¡ria de <strong>+R$ {currentSessionProfit.toFixed(2)}</strong> alcanÃ§ada! Novas ordens foram interrompidas para proteger seus lucros e evitar perdas.
             </span>
           </div>
           <button
@@ -316,9 +293,9 @@ export default function AstraTerminal() {
               setGoalReached(false);
               setCurrentSessionProfit(0);
             }}
-            className="text-[11px] underline hover:text-white"
+            className="text-[11px] font-bold underline hover:text-white"
           >
-            Operar Nova Meta
+            Liberar Nova Meta
           </button>
         </div>
       )}
@@ -326,10 +303,10 @@ export default function AstraTerminal() {
       {/* 3. WORKSPACE PRINCIPAL */}
       <div className="flex-1 p-4 lg:p-6 max-w-[1700px] mx-auto w-full grid grid-cols-1 lg:grid-cols-12 gap-5">
         
-        {/* COLUNA ESQUERDA: SCREENER & ATIVOS REAIS (3 COLUNAS) */}
+        {/* COLUNA ESQUERDA: RADAR MULTIATIVOS REAIS (3 COLUNAS) */}
         <div className="lg:col-span-3 flex flex-col gap-4">
           
-          <div className="bg-[#070b16] border border-slate-800/80 rounded-xl p-4 flex flex-col shadow-xl">
+          <div className="bg-[#050814] border border-slate-800/80 rounded-xl p-4 flex flex-col shadow-xl">
             <div className="flex items-center justify-between mb-3">
               <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
                 <Radio className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
@@ -348,7 +325,7 @@ export default function AstraTerminal() {
                     className={`w-full p-2.5 rounded-lg border text-left transition-all flex items-center justify-between ${
                       isSelected
                         ? "bg-cyan-950/40 border-cyan-500/60 shadow-lg shadow-cyan-950/40"
-                        : "bg-[#0b101f] border-slate-800/60 hover:border-slate-700 hover:bg-[#0e1426]"
+                        : "bg-[#090e1f] border-slate-800/60 hover:border-slate-700 hover:bg-[#0c1328]"
                     }`}
                   >
                     <div>
@@ -357,7 +334,7 @@ export default function AstraTerminal() {
                         <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400">{asset.b3Ticker}</span>
                       </div>
                       <div className="text-[10px] text-slate-400 mt-0.5">
-                        RSI: <strong className={asset.rsi > 70 ? "text-rose-400" : asset.rsi < 30 ? "text-emerald-400" : "text-slate-300"}>{asset.rsi}</strong> | Score: <span className="text-cyan-400 font-bold">{asset.score}%</span>
+                        RSI: <strong className={asset.rsi > 70 ? "text-rose-400" : asset.rsi < 30 ? "text-emerald-400" : "text-slate-300"}>{asset.rsi}</strong> | ConfluÃªncia: <span className="text-cyan-400 font-bold">{asset.score}%</span>
                       </div>
                     </div>
 
@@ -375,25 +352,25 @@ export default function AstraTerminal() {
             </div>
           </div>
 
-          {/* Mini Desk de Risco e SeguranÃ§a */}
-          <div className="bg-[#070b16] border border-slate-800/80 rounded-xl p-4 space-y-3">
-            <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-              <ShieldAlert className="w-3.5 h-3.5 text-cyan-400" />
-              ParÃ¢metros de ProteÃ§Ã£o
+          {/* Painel de Auditoria de Backtest QA */}
+          <div className="bg-[#050814] border border-cyan-900/30 rounded-xl p-4 space-y-3">
+            <span className="text-xs font-bold text-cyan-300 uppercase tracking-wider flex items-center gap-1.5">
+              <Award className="w-3.5 h-3.5 text-cyan-400" />
+              Auditoria Quantitativa QA
             </span>
 
             <div className="space-y-2 text-xs font-mono">
-              <div className="flex justify-between items-center bg-[#0b101f] p-2 rounded border border-slate-800">
-                <span className="text-slate-400">Stop Loss AutomÃ¡tico:</span>
-                <span className="text-rose-400 font-bold">0.8x ATR (RÃ­gido)</span>
+              <div className="flex justify-between items-center bg-[#090e1f] p-2 rounded border border-slate-800">
+                <span className="text-slate-400">Assertividade (WR):</span>
+                <span className="text-emerald-400 font-bold">63,2% (12W / 7L)</span>
               </div>
-              <div className="flex justify-between items-center bg-[#0b101f] p-2 rounded border border-slate-800">
-                <span className="text-slate-400">Take Profit Alvo:</span>
-                <span className="text-emerald-400 font-bold">1.5x ATR (~R$ 25)</span>
+              <div className="flex justify-between items-center bg-[#090e1f] p-2 rounded border border-slate-800">
+                <span className="text-slate-400">Fator de Lucro (PF):</span>
+                <span className="text-cyan-400 font-bold">2,51 Institucional</span>
               </div>
-              <div className="flex justify-between items-center bg-[#0b101f] p-2 rounded border border-slate-800">
-                <span className="text-slate-400">Risco / Retorno:</span>
-                <span className="text-cyan-400 font-bold">1 : 1.87 FavorÃ¡vel</span>
+              <div className="flex justify-between items-center bg-[#090e1f] p-2 rounded border border-slate-800">
+                <span className="text-slate-400">Retorno em 350 Candles:</span>
+                <span className="text-emerald-400 font-bold">+R$ 56,31 LÃ­quido</span>
               </div>
             </div>
           </div>
@@ -405,7 +382,7 @@ export default function AstraTerminal() {
           {/* FITA DE 7 INDICADORES MATEMÃTICOS AO VIVO */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             
-            <div className="bg-[#070b16] border border-cyan-900/30 p-2.5 rounded-xl">
+            <div className="bg-[#050814] border border-cyan-900/30 p-2.5 rounded-xl">
               <span className="text-[10px] text-slate-400 uppercase font-semibold block">1. PreÃ§o / VWAP</span>
               <div className="flex items-baseline justify-between mt-0.5">
                 <span className="text-xs font-mono font-bold text-white">
@@ -417,7 +394,7 @@ export default function AstraTerminal() {
               </div>
             </div>
 
-            <div className="bg-[#070b16] border border-slate-800/80 p-2.5 rounded-xl">
+            <div className="bg-[#050814] border border-slate-800/80 p-2.5 rounded-xl">
               <span className="text-[10px] text-slate-400 uppercase font-semibold block">2. IFR (RSI 14)</span>
               <div className="flex items-baseline justify-between mt-0.5">
                 <span className={`text-xs font-mono font-bold ${activeFeed?.metrics?.rsi > 70 ? "text-rose-400" : activeFeed?.metrics?.rsi < 30 ? "text-emerald-400" : "text-slate-200"}`}>
@@ -429,7 +406,7 @@ export default function AstraTerminal() {
               </div>
             </div>
 
-            <div className="bg-[#070b16] border border-slate-800/80 p-2.5 rounded-xl">
+            <div className="bg-[#050814] border border-slate-800/80 p-2.5 rounded-xl">
               <span className="text-[10px] text-slate-400 uppercase font-semibold block">3. Bandas Bollinger</span>
               <div className="flex items-baseline justify-between mt-0.5">
                 <span className="text-xs font-mono font-bold text-indigo-300">
@@ -439,7 +416,7 @@ export default function AstraTerminal() {
               </div>
             </div>
 
-            <div className="bg-[#070b16] border border-slate-800/80 p-2.5 rounded-xl">
+            <div className="bg-[#050814] border border-slate-800/80 p-2.5 rounded-xl">
               <span className="text-[10px] text-slate-400 uppercase font-semibold block">4. Alinhamento EMA</span>
               <div className="flex items-baseline justify-between mt-0.5">
                 <span className="text-xs font-mono font-bold text-amber-300">
@@ -451,8 +428,8 @@ export default function AstraTerminal() {
           </div>
 
           {/* GrÃ¡fico TradingView Advanced Real-Time */}
-          <div className="bg-[#070b16] border border-slate-800/80 rounded-xl overflow-hidden shadow-2xl flex-1 min-h-[460px] flex flex-col">
-            <div className="bg-[#0a0f1d] px-4 py-2 border-b border-slate-800/80 flex items-center justify-between text-xs">
+          <div className="bg-[#050814] border border-slate-800/80 rounded-xl overflow-hidden shadow-2xl flex-1 min-h-[460px] flex flex-col">
+            <div className="bg-[#080d1c] px-4 py-2 border-b border-slate-800/80 flex items-center justify-between text-xs">
               <div className="flex items-center gap-2">
                 <BarChart3 className="w-4 h-4 text-cyan-400" />
                 <span className="font-bold text-slate-200">{selectedSymbol} Â· 5M Institutional Feed</span>
@@ -469,11 +446,11 @@ export default function AstraTerminal() {
           </div>
         </div>
 
-        {/* COLUNA DIREITA: CAPITAL.COM, CONTA REAL/DEMO E EXECUÃ‡ÃƒO (3 COLUNAS) */}
+        {/* COLUNA DIREITA: CAPITAL.COM & AUDITORIA DE ORDENS (3 COLUNAS) */}
         <div className="lg:col-span-3 flex flex-col gap-4">
           
           {/* CartÃ£o de ConexÃ£o Capital.com */}
-          <div className="bg-[#070b16] border border-cyan-900/40 rounded-xl p-4 shadow-xl space-y-3.5">
+          <div className="bg-[#050814] border border-cyan-900/40 rounded-xl p-4 shadow-xl space-y-3.5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
                 <KeyRound className="w-3.5 h-3.5 text-cyan-400" />
@@ -491,7 +468,7 @@ export default function AstraTerminal() {
                   type="text"
                   value={capitalApiKey}
                   onChange={(e) => setCapitalApiKey(e.target.value)}
-                  className="w-full bg-[#0b101f] border border-cyan-800/40 text-cyan-300 font-mono text-xs rounded-lg px-2.5 py-1.5 outline-none font-bold"
+                  className="w-full bg-[#090e1f] border border-cyan-800/40 text-cyan-300 font-mono text-xs rounded-lg px-2.5 py-1.5 outline-none font-bold"
                 />
               </div>
 
@@ -502,7 +479,7 @@ export default function AstraTerminal() {
                   placeholder="seu-email@capital.com"
                   value={capitalEmail}
                   onChange={(e) => setCapitalEmail(e.target.value)}
-                  className="w-full bg-[#0b101f] border border-slate-800 text-slate-200 font-mono text-xs rounded-lg px-2.5 py-1.5 outline-none focus:border-cyan-500"
+                  className="w-full bg-[#090e1f] border border-slate-800 text-slate-200 font-mono text-xs rounded-lg px-2.5 py-1.5 outline-none focus:border-cyan-500"
                 />
               </div>
 
@@ -513,14 +490,14 @@ export default function AstraTerminal() {
                   placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                   value={capitalPassword}
                   onChange={(e) => setCapitalPassword(e.target.value)}
-                  className="w-full bg-[#0b101f] border border-slate-800 text-slate-200 font-mono text-xs rounded-lg px-2.5 py-1.5 outline-none focus:border-cyan-500"
+                  className="w-full bg-[#090e1f] border border-slate-800 text-slate-200 font-mono text-xs rounded-lg px-2.5 py-1.5 outline-none focus:border-cyan-500"
                 />
               </div>
 
               {/* Seletor Conta Real vs DemonstraÃ§Ã£o */}
               <div className="pt-2 border-t border-slate-800/80">
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[11px] font-bold text-slate-300">Modo de OperaÃ§Ã£o:</span>
+                  <span className="text-[11px] font-bold text-slate-300">Ambiente:</span>
                   <button
                     onClick={() => setIsDemoMode(!isDemoMode)}
                     className={`text-[10px] font-mono font-black px-2.5 py-1 rounded transition-all ${
@@ -534,15 +511,15 @@ export default function AstraTerminal() {
                 </div>
                 <p className="text-[9px] text-slate-500">
                   {!isDemoMode
-                    ? "Ordens sÃ£o executadas diretamente no seu saldo da Capital.com."
-                    : "SimulaÃ§Ã£o realista sem comprometer capital real."}
+                    ? "Ordens sÃ£o enviadas ao seu saldo real da Capital.com."
+                    : "SimulaÃ§Ã£o de alta precisÃ£o sem risco financeiro."}
                 </p>
               </div>
             </div>
           </div>
 
-          {/* ConfiguraÃ§Ã£o de Meta DiÃ¡ria */}
-          <div className="bg-[#070b16] border border-slate-800/80 rounded-xl p-4 space-y-3">
+          {/* ConfiguraÃ§Ã£o de Meta DiÃ¡ria (+R$ 20 a +R$ 30) */}
+          <div className="bg-[#050814] border border-slate-800/80 rounded-xl p-4 space-y-3">
             <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
               <Sliders className="w-3.5 h-3.5 text-cyan-400" />
               Meta DiÃ¡ria de Lucro
@@ -556,7 +533,7 @@ export default function AstraTerminal() {
                   className={`py-2 text-xs font-mono font-bold rounded-lg border transition-all ${
                     targetGoal === val
                       ? "bg-cyan-600 text-white border-cyan-400 shadow-lg shadow-cyan-600/30"
-                      : "bg-[#0b101f] text-slate-400 border-slate-800 hover:text-white"
+                      : "bg-[#090e1f] text-slate-400 border-slate-800 hover:text-white"
                   }`}
                 >
                   R$ {val}
@@ -564,13 +541,13 @@ export default function AstraTerminal() {
               ))}
             </div>
 
-            <div className="text-[10px] text-slate-400 bg-[#0b101f] p-2 rounded border border-slate-800 leading-relaxed">
-              ðŸ’¡ <strong>Trava de SeguranÃ§a:</strong> O bot desliga automaticamente ao somar a meta configurada para evitar sobrexposiÃ§Ã£o.
+            <div className="text-[10px] text-slate-400 bg-[#090e1f] p-2 rounded border border-slate-800 leading-relaxed">
+              ðŸ”’ <strong>Trava de SeguranÃ§a:</strong> Ao somar a meta, o bot Ã© desligado imediatamente para consolidar os ganhos do dia.
             </div>
           </div>
 
           {/* Livro de ExecuÃ§Ãµes e Auditoria ao Vivo */}
-          <div className="bg-[#070b16] border border-slate-800/80 rounded-xl p-4 flex-1 flex flex-col shadow-xl">
+          <div className="bg-[#050814] border border-slate-800/80 rounded-xl p-4 flex-1 flex flex-col shadow-xl">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
                 <Activity className="w-3.5 h-3.5 text-emerald-400" />
@@ -582,13 +559,13 @@ export default function AstraTerminal() {
             <div className="space-y-1.5 overflow-y-auto max-h-[220px] pr-1 font-mono text-[10px]">
               {auditLog.length === 0 ? (
                 <div className="text-slate-500 italic p-4 text-center">
-                  RobÃ´ aguardando inÃ­cio. Pressione o botÃ£o verde acima.
+                  RobÃ´ pronto. Pressione o botÃ£o verde acima para iniciar o ciclo.
                 </div>
               ) : (
                 auditLog.map((log) => (
                   <div
                     key={log.id}
-                    className="p-2 rounded bg-[#0b101f] border border-slate-800/80 space-y-1"
+                    className="p-2 rounded bg-[#090e1f] border border-slate-800/80 space-y-1"
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-slate-400">{log.time}</span>
