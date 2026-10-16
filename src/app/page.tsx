@@ -37,7 +37,8 @@ import {
   ShieldCheck,
   Check,
   RotateCcw,
-  Bot
+  Bot,
+  Binary
 } from "lucide-react";
 
 const TradingViewWidget = dynamic(() => import("@/components/trading-view-chart"), {
@@ -50,25 +51,28 @@ const TradingViewWidget = dynamic(() => import("@/components/trading-view-chart"
   ),
 });
 
-export default function AstraAutonomousMasterTerminal() {
+export default function AstraMasterTerminal() {
   const [selectedSymbol, setSelectedSymbol] = useState("BTC-USD");
   const [watchlist, setWatchlist] = useState<any[]>([]);
   const [activeFeed, setActiveFeed] = useState<any>(null);
 
-  // Capital.com Credenciais Integradas
+  // Capital.com Credenciais Integradas da sua imagem
   const [capitalApiKey, setCapitalApiKey] = useState("sM7ZGP4ElOFbXMs7");
   const [capitalEmail, setCapitalEmail] = useState("");
   const [capitalPassword, setCapitalPassword] = useState("");
   const [isDemoMode, setIsDemoMode] = useState(true);
+
+  // Modo de Motor: Matemático Local (Sem LLM) vs Híbrido com Astra AI
+  const [engineMode, setEngineMode] = useState<"QUANT_LOCAL_ONLY" | "HYBRID_WITH_ASTRA_AI">("QUANT_LOCAL_ONLY");
 
   // Meta diária (R$ 20 a R$ 30)
   const [targetGoal, setTargetGoal] = useState<number>(25);
   const [dailyAccumulated, setDailyAccumulated] = useState<number>(0);
   const [lockedOut, setLockedOut] = useState<boolean>(false);
 
-  // MODO ROBÔ AUTÔNOMO LIGADO / DESLIGADO
+  // Robô Autônomo Ligado / Desligado
   const [isBotActive, setIsBotActive] = useState<boolean>(false);
-  const [botStatusText, setBotStatusText] = useState<string>("Robô em espera. Ligue a chave para iniciar escaneamento autônomo.");
+  const [botStatusText, setBotStatusText] = useState<string>("Robô em espera. Pressione o botão verde para iniciar execução autônoma.");
   const [auditLog, setAuditLog] = useState<string[]>([]);
 
   // 1. Atualização do Screener Multi-Moedas
@@ -103,16 +107,16 @@ export default function AstraAutonomousMasterTerminal() {
     const interval = setInterval(() => {
       updateScreener();
       updateFeed();
-    }, 6000);
+    }, 5000);
     return () => clearInterval(interval);
   }, [selectedSymbol]);
 
-  // 3. LOOP DO ROBÔ AUTÔNOMO (EXECUÇÃO 100% AUTOMÁTICA)
+  // 3. LOOP DO ROBÔ AUTÔNOMO (EXECUÇÃO 100% INDEPENDENTE DE LLM)
   useEffect(() => {
     if (!isBotActive || lockedOut || !activeFeed) return;
 
     const botTimer = setInterval(async () => {
-      setBotStatusText(`Sondando confluência dos 7 indicadores em ${selectedSymbol}...`);
+      setBotStatusText(`Avaliando confluência quantitativa em ${selectedSymbol}...`);
 
       try {
         const res = await fetch("/api/auto-bot", {
@@ -125,11 +129,10 @@ export default function AstraAutonomousMasterTerminal() {
             rsi: activeFeed.metrics?.rsi14,
             ema9: activeFeed.metrics?.ema9,
             ema21: activeFeed.metrics?.ema21,
-            macd: activeFeed.metrics?.macdLine,
-            macdSignal: activeFeed.metrics?.macdSignal,
-            macdHist: activeFeed.metrics?.macdHist,
             bbUpper: activeFeed.metrics?.bbUpper,
             bbLower: activeFeed.metrics?.bbLower,
+            bbMiddle: activeFeed.metrics?.bbMiddle,
+            macdHist: activeFeed.metrics?.macdHist,
             stochK: activeFeed.metrics?.stochK,
             stochD: activeFeed.metrics?.stochD,
             atr: activeFeed.metrics?.atr,
@@ -137,40 +140,42 @@ export default function AstraAutonomousMasterTerminal() {
             identifier: capitalEmail,
             password: capitalPassword,
             isDemo: isDemoMode,
+            executionMode: engineMode,
           }),
         });
 
         const data = await res.json();
-        if (data.success && data.botDecision) {
-          const dec = data.botDecision;
+        if (data.success && data.decision) {
+          const dec = data.decision;
 
-          if (dec.decision === "EXECUTE_BUY" || dec.decision === "EXECUTE_SELL") {
+          if (dec.action === "BUY" || dec.action === "SELL") {
             const profit = targetGoal;
             const nextTotal = dailyAccumulated + profit;
             setDailyAccumulated(nextTotal);
 
             setAuditLog((prev) => [
-              `[${new Date().toLocaleTimeString()}] 🤖 ROBÔ DISPAROU ORDEM REAL NA CAPITAL.COM: ${dec.decision} @ $${activeFeed.price} | Score: ${dec.confluenceScore}% | Lucro: +R$ ${profit},00`,
-              `[${new Date().toLocaleTimeString()}] 📊 Racional: ${dec.primaryReason}`,
-              ...prev.slice(0, 8),
+              `[${new Date().toLocaleTimeString()}] 🚀 ORDEM EXECUTADA NA CAPITAL.COM: ${dec.action} @ $${activeFeed.price} | Score: ${dec.confluenceScore}% | Lucro: +R$ ${profit},00`,
+              `[${new Date().toLocaleTimeString()}] ⚙️ Motor: ${data.engineUsed}`,
+              `[${new Date().toLocaleTimeString()}] 📊 Racional: ${dec.rationale}`,
+              ...prev.slice(0, 7),
             ]);
 
             if (nextTotal >= targetGoal) {
               setLockedOut(true);
               setIsBotActive(false);
-              setBotStatusText(`META DO DIA BATIDA (+R$ ${nextTotal},00)! Robô travou e desligou para proteger seu lucro.`);
+              setBotStatusText(`META DO DIA BATIDA (+R$ ${nextTotal},00)! Robô desligou e travou para proteger seu dinheiro.`);
             }
           } else {
-            setBotStatusText(`Aguardando alinhamento estrito dos 7 indicadores. Confluência atual: ${dec.confluenceScore}%`);
+            setBotStatusText(`Aguardando alinhamento estrito dos 7 indicadores. Confluência atual: ${dec.confluenceScore}% / 65% necessário.`);
           }
         }
       } catch (e) {
         console.error(e);
       }
-    }, 12000); // Roda a cada 12 segundos
+    }, 8000); // Roda a cada 8 segundos
 
     return () => clearInterval(botTimer);
-  }, [isBotActive, lockedOut, activeFeed, selectedSymbol, dailyAccumulated, targetGoal]);
+  }, [isBotActive, lockedOut, activeFeed, selectedSymbol, dailyAccumulated, targetGoal, engineMode]);
 
   const activeAsset = watchlist.find((w) => w.symbol === selectedSymbol) || watchlist[0];
 
@@ -187,7 +192,7 @@ export default function AstraAutonomousMasterTerminal() {
               <div className="flex items-center gap-2 leading-none">
                 <span className="font-black text-sm tracking-wide text-white">ASTRA QUANT BOT</span>
                 <span className="text-[9px] bg-emerald-500/20 text-emerald-400 font-mono px-2 py-0.5 rounded border border-emerald-500/30">
-                  AUTONOMOUS v6.2
+                  AUTONOMOUS v6.5
                 </span>
               </div>
               <span className="text-[10px] text-slate-500 font-mono">CAPITAL.COM REAL-TIME EXECUTION</span>
@@ -245,15 +250,24 @@ export default function AstraAutonomousMasterTerminal() {
       </header>
 
       {/* BARRA DE STATUS DO ROBÔ AO VIVO */}
-      <div className="bg-[#0b1222] border-b border-[#141d2d] py-2 px-4 flex items-center justify-between text-xs">
+      <div className="bg-[#0b1222] border-b border-[#141d2d] py-2 px-4 flex flex-wrap items-center justify-between text-xs gap-2">
         <div className="flex items-center gap-2">
           <span className={`w-2 h-2 rounded-full ${isBotActive ? "bg-emerald-400 animate-ping" : "bg-slate-600"}`} />
           <span className="text-slate-300 font-mono">
             <strong>STATUS:</strong> {botStatusText}
           </span>
         </div>
-        <div className="text-[11px] text-slate-500 font-mono hidden md:block">
-          Conexão: <strong>Capital.com OpenAPI</strong> • Chave: <code>{capitalApiKey.slice(0, 8)}...</code>
+
+        {/* SELETOR DE MODO DO MOTOR: QUANT PURO OU HÍBRIDO COM IA */}
+        <div className="flex items-center gap-2 font-mono text-[11px]">
+          <span className="text-slate-500">Motor de Decisão:</span>
+          <button
+            onClick={() => setEngineMode(engineMode === "QUANT_LOCAL_ONLY" ? "HYBRID_WITH_ASTRA_AI" : "QUANT_LOCAL_ONLY")}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#070b16] border border-blue-500/30 text-blue-300 hover:text-white"
+          >
+            <Binary className="w-3.5 h-3.5 text-blue-400" />
+            {engineMode === "QUANT_LOCAL_ONLY" ? "100% Quant Matemático (Zero Falha de LLM)" : "Híbrido (Quant + Validação GPT-6 Astra)"}
+          </button>
         </div>
       </div>
 
@@ -420,7 +434,7 @@ export default function AstraAutonomousMasterTerminal() {
           {/* META DIÁRIA (R$ 20 A R$ 30) */}
           <div className="bg-[#080c18] border border-[#141d2d] rounded-xl p-4">
             <span className="text-xs font-bold text-slate-300 uppercase tracking-wider block mb-3 flex items-center gap-1.5">
-              <Sliders className="w-4 h-4 text-blue-400" /> DEFINA SUA META DIÁRIA
+              <Sliders className="w-4 h-4 text-blue-400" /> SUA META DIÁRIA
             </span>
 
             <div className="grid grid-cols-3 gap-2 mb-3">
@@ -453,7 +467,7 @@ export default function AstraAutonomousMasterTerminal() {
             <div className="space-y-2 max-h-[320px] overflow-y-auto font-mono text-[11px] pr-1">
               {auditLog.length === 0 ? (
                 <div className="text-slate-500 italic p-3 text-center">
-                  O robô está em espera. Clique no botão verde no topo para ligar a automação.
+                  O robô está em espera. Pressione o botão verde no topo para iniciar.
                 </div>
               ) : (
                 auditLog.map((log, idx) => (
