@@ -1,47 +1,77 @@
-# ASTRA LAB
+# Astra — robô pessoal de estratégias
 
-Laboratório de **paper trading spot comprado**, sem alavancagem, com dados públicos da Coinbase Exchange. Não recebe depósitos, não envia ordens e não promete ganhos. A integração legada com a Capital.com está indisponível nesta versão.
+Entrega no estado atual solicitado pelo usuário. **Não há lucro comprovado, conta demo conectada ou ordens reais habilitadas.** Comercialização e cobrança foram retiradas do escopo inicial.
+
+## Funcionalidades entregues
+
+O terminal `/` consulta livro e candles reais Coinbase, mantém carteira virtual com perdas/custos e exibe lógica explicável. Três hipóteses: Trend Pullback, Range Reversion e Breakout. Auto adapta a regra ao regime de alta, baixa, lateralidade ou volatilidade extrema. Indicadores em até120candles: EMA9/21/50, RSI/ATR de Wilder, Bollinger20, eficiência20 e volume. Score0–100 é confluência, não chance de ganhar.
+
+O laboratório `/laboratorio` obtém7/14/30dias de candles fechados de1h, divide treino/validação70/30, seleciona apenas pelo treino e testa custos1,5×. Exportação inclui dados reais, parâmetros, métricas e SHA256. O modo automático é uma política distinta: o laboratório avalia as hipóteses individuais, não seu resultado agregado. A metodologia está em `/metodologia`.
+
+Dois workers independentes do navegador: paper e Capital.com demo. Ambos usam lock de processo e estado em arquivo. O demo observa por padrão, exige orçamento USD e custos explícitos para permitir ordens fictícias, persiste intenção antes de enviar e reconcilia confirmação, IDs exatos, tamanho e proteções. **Nenhum worker demo foi iniciado com conta externa.**
 
 ## Executar
 
-Use Node.js 22 e o lockfile do projeto:
+Node.js22 e lockfile do projeto:
 
 ```bash
 npm ci
-npm test
 npm run typecheck
+npm test
 npm run build
 npm run start -- --hostname 0.0.0.0 --port 3000
 ```
 
-## O que a simulação mede
+Uma leitura paper, sem permitir entradas:
 
-A carteira começa com R$ 30 virtuais. A conversão USD/BRL é **manual e fixa na sessão**, inicialmente 5,00; não é uma cotação validada. A taxa padrão de 60 bps por lado e o slippage de 5 bps são hipóteses de simulação, não tarifas confirmadas de uma conta. Ajuste antes de iniciar e exporte os parâmetros junto aos resultados.
+```bash
+npm run bot:paper -- --once
+```
 
-O motor consulta o mercado a cada cinco segundos após a conclusão da resposta. Ele só considera compra se a liquidez nos seis primeiros níveis do livro for pelo menos 60% compradora, o RSI simples de 14 períodos estiver entre 50 e 65 e o preço médio do livro superar a VWAP móvel. Essa regra é uma **hipótese não validada**, não uma probabilidade de acerto nem identificação de fluxo institucional.
+Paper contínuo com entradas condicionais; não envia ordens à corretora:
 
-A entrada usa o ask com slippage; a saída usa o bid com slippage. O custo de ambas as pontas entra no resultado. Alvo e stop são distâncias de ATR, não valores de lucro inventados. Uma entrada é vetada se a relação retorno/risco projetada, líquida dos custos, ficar abaixo de 1,5. O cálculo é uma condição de entrada, não evidência de expectativa estatística positiva.
+```bash
+npm run bot:paper -- --start --symbol BTC-USD --strategy auto --timeframe 3600 --state-dir .astra-paper
+```
 
-O risco planejado é de até 1% do patrimônio por operação, com até 25% de exposição e uma posição por vez. A perda de sessão de 3% aciona fechamento simulado e bloqueia entradas quando observada. Gaps, feed indisponível e intervalo entre consultas podem gerar perdas maiores. Não há stop garantido.
+Pesquisa reproduzível:
 
-Saldo virtual, resultado realizado, resultado em aberto e taxas são exibidos separadamente. Pausar bloqueia novas entradas; uma posição existente continua sendo monitorada. Sem feed válido não se inventa entrada ou saída. A troca de ativo fica bloqueada durante a execução e enquanto há posição aberta.
+```bash
+npm run research -- --symbol BTC-USD --days 30 --output .astra-research/report.json
+```
 
-## Persistência e evidência
+`research --config arquivo.json` permite hipóteses de custos/capital. Default spot:60bps por lado, slippage5bps por lado, spread assumido2bps e USD/BRL manual5. Esses parâmetros **não** são tarifas/câmbio verificados da sua conta Capital.com. Não reduzi-los apenas para apresentar um resultado positivo.
 
-A sessão fica no `localStorage` do navegador, sem credenciais. Reabrir a aba restaura a carteira, mas não reativa entradas. O monitoramento só existe com a página aberta: fechar a aba não executa stops. Uma sessão nova pode apagar o histórico local, com confirmação na interface; exporte antes de reiniciar.
+## Demo — conexão pendente
 
-A exportação JSON inclui todos os trades da sessão, configuração e os últimos 300 eventos de decisão com snapshots. Os últimos 300 eventos e o ledger da sessão persistem no navegador. Estados estruturalmente inválidos ou que não reconciliam são descartados. Dados locais podem ser editados e não constituem auditoria independente. O gráfico TradingView é indicativo; o cálculo usa o feed REST Coinbase, não dados do widget.
+O adaptador tem endpoint fixo `https://demo-api-capital.backend-capital.com/api/v1`. Não existe destino real configurável nele. Variáveis server-side necessárias: `CAPITAL_DEMO_API_KEY`, `CAPITAL_DEMO_IDENTIFIER`, `CAPITAL_DEMO_PASSWORD` (custom password da chave API). As credenciais não foram conectadas nesta tarefa: a configuração protegida foi recusada. Sem elas, o worker falha antes da rede. Não colocar valores no chat, Git ou navegador, nem reutilizar a chave exposta anteriormente.
 
-## Segurança da versão anterior
+Após configuração autorizada, observar a conta/instrumento:
 
-Havia segredos literais, lucro aleatório e fallback de autenticação que produzia saldo ou sucesso de ordem simulados. Foram removidos do código atual. **Isso não revoga credenciais já expostas nem elimina o histórico do Git ou deployments anteriores.** O titular precisa revogar/substituir as chaves nos provedores. Não reutilize as antigas.
+```bash
+npm run bot:demo -- --epic EPIC_DA_CORRETORA --once
+```
 
-As rotas `capital-trade`, `capital-balance`, `auto-bot`, `atlas-engine` e `astra-live` retornam HTTP 410 sem rede ou uso de credenciais. O cliente legado exige credenciais completas, permite apenas ambiente demo de leitura e rejeita qualquer envio de ordem.
+O epic precisa ser confirmado na Capital.com, nunca deduzido de `BTC-USD`. A versão aceita apenas CFD cripto USD, lotSize1 e scalingFactor1; outras moedas/tipos/regras são recusados. Ordens demo são desativadas por padrão. `--enable-demo-orders` exige `--budget-usd`, `--fee-bps` e `--slippage-bps` explícitos. `--strategy` aceita `auto`, `trend_pullback`, `range_reversion`, `breakout`; `--state-dir` separa experimentos.
 
-## Antes de dinheiro real
+Referência de envio não é execução. Estados `SUBMITTING`/`UNKNOWN`/`PENDING` não permitem reenvio automático. Posições desconhecidas, intenção incerta, proteções ausentes e mudança de conta bloqueiam novas entradas. O journal registra saldo de conta e fechamento observado, sem inventar PnL por trade.
 
-Primeiro medir resultados líquidos em períodos independentes e registrar também sessões negativas ou sem operação. Não há backtest validado nesta entrega; candles OHLC não reconstruem livro histórico e não bastam para testar essa estratégia de livro. O desempenho de paper trading não garante execução real.
+**Integração externa ainda não validada end-to-end.** Testes de corretora são mocks. Epics atuais, lotes, ordens aceitas, tarifas/financiamento e a interpretação do proxy contábil `balance + profitLoss` ainda precisam ser verificados na conta. O proxy serve apenas como guarda de variação da sessão, não relatório auditado de patrimônio. O controle de perda demo bloqueia novas entradas; não é liquidação garantida de posição aberta.
 
-Uma futura integração precisa de autenticação e autorização por usuário, armazenamento protegido de segredos, preços e metadados da própria corretora, moeda da conta, lote mínimo, margem e distâncias de stop. Também exige execução server-side persistente, idempotência, confirmação de ordens e reconciliação de posições, além de análise fora da amostra. Preços spot Coinbase não devem ser usados como se fossem preços CFD da Capital.com.
+## Risco, persistência e limites
 
-Consulte [a documentação oficial Capital.com](https://open-api.capital.com/) e [os limites do endpoint de candles Coinbase](https://docs.cdp.coinbase.com/exchange/reference/exchangerestapi_getproductcandles). O caminho de engenharia e os achados estão em `docs/auditoria.md`.
+Risco planejado≤1%, exposição≤25%, uma posição, bloqueio de perda de sessão3%, retorno/risco líquido mínimo1,5 e uma entrada por candle no primeiro minuto após fechar. Dados antigos/inconsistentes e custos podem vetar entradas. Lote demo é arredondado para baixo; não é elevado ao mínimo quando o orçamento não comporta. Stops e limites planejados não garantem perda máxima.
+
+CFD não é spot. Margem, financiamento, contratos e execução da Capital.com não são reproduzidos pelo histórico Coinbase. Paper usa quotes observadas com polling; backtest usa OHLC e abertura seguinte hipotética, stop prioritário na ambiguidade e gaps adversos. Um rótulo promissor ainda não autoriza dinheiro real.
+
+Carteira do terminal: `localStorage`, ledger validado, últimos300eventos e lock exclusivo entre abas. Restauração não liga entradas. Fechar a aba interrompe monitoramento; dados locais são editáveis, não auditoria independente. Workers usam checkpoint/journal em diretórios ignorados no Git. Não compartilhar diretórios entre processos nem descartar intenção incerta para reenviar. Após queda, verificar processo e conta antes de lidar com lock antigo. `Ctrl+C` salva estado e não afirma fechamento que não observou; proteções demo confirmadas permanecem no broker.
+
+Sandbox é uma prévia temporária e pode hibernar. Workers precisam de processo e armazenamento duráveis em ambiente ligado; Vercel serverless não é worker residente. Não foi implantado serviço24h.
+
+## Resultado observado nesta entrega
+
+Histórico real BTC-USD:30dias,720candles de1h. Com custos padrão, nenhuma hipótese gerou operação elegível; seleção nula, veredito **INSUFICIENTE**. Isso é ausência de operações no modelo, não prova de uma estratégia lucrativa. Não há base para afirmar que o robô já ganha dinheiro.
+
+Validação:88testes passaram, TypeScript e build passaram, auditoria npm sem vulnerabilidades reportadas. Mais detalhes em `docs/auditoria.md` e `docs/validacao.md`. Produção não foi alterada; não foram enviados depósitos, ordens reais ou ordens demo externas.
+
+[API Capital.com](https://open-api.capital.com/) · [Candles Coinbase](https://docs.cdp.coinbase.com/exchange/reference/exchangerestapi_getproductcandles)

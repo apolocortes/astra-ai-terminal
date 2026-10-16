@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "next start",
     "test": "tsx --test tests/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "bot:paper": "tsx scripts/paper-worker.ts",
+    "bot:demo": "tsx scripts/demo-worker.ts",
+    "research": "tsx scripts/research.ts"
   },
   "dependencies": {
     "lucide-react": "^0.475.0",

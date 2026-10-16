@@ -19,6 +19,8 @@ const finite = (...values: number[]) => values.every(Number.isFinite);
 const near = (a: number, b: number) =>
   Math.abs(a - b) <= 1e-7 * Math.max(1, Math.abs(a), Math.abs(b));
 function validatePosition(p: Position, state: PaperState, now: number) {
+  const hasPlan = p && [p.strategyId,p.signalCandleTime,p.timeframeSeconds,p.maxHoldingMs].some(v=>v!==undefined);
+  if (hasPlan && (!['trend_pullback','range_reversion','breakout'].includes(p.strategyId || '') || !finite(p.signalCandleTime!,p.timeframeSeconds!,p.maxHoldingMs!) || ![60,3600].includes(p.timeframeSeconds!) || p.signalCandleTime! < 0 || (p.signalCandleTime! + p.timeframeSeconds!) * 1000 > p.openedAt || p.maxHoldingMs !== p.timeframeSeconds! * 48 * 1000)) throw new Error('Plano de estratégia salvo inválido.');
   if (
     !p ||
     typeof p.symbol !== "string" ||
@@ -48,6 +50,7 @@ export function validatePaperState(
     throw new Error("Sessão salva inválida.");
   const state = input as PaperState;
   validateConfig(state.config);
+  if (state.lastSignalCandleTime !== undefined && (!Number.isFinite(state.lastSignalCandleTime) || state.lastSignalCandleTime < 0 || state.lastSignalCandleTime * 1000 > now + 2000)) throw new Error('Último sinal salvo inválido.');
   if (
     state.version !== 1 ||
     !Array.isArray(state.trades) ||
@@ -126,6 +129,8 @@ export function validatePaperState(
     state.lastClosedAt !== previousClose
   )
     throw new Error("Ledger salvo não reconcilia.");
+  const signalTimes = [...state.trades, ...(state.position ? [state.position] : [])].map(p=>p.signalCandleTime).filter((v):v is number=>v!==undefined);
+  if(signalTimes.length && state.lastSignalCandleTime !== Math.max(...signalTimes)) throw new Error('Deduplicação de sinais não reconcilia com o ledger.');
   return state;
 }
 export function encodePaper(session: PaperState, evidence: Evidence[]): string {

@@ -1,4 +1,6 @@
 // Simulação spot educacional. Nenhuma função envia ordens a uma corretora.
+import type { Candle } from './market-indicators';
+import type { StrategyDecision, StrategyId } from './strategy-engine';
 export interface Snapshot {
   success: true;
   symbol: string;
@@ -14,6 +16,8 @@ export interface Snapshot {
     asks: { price: number; size: number }[];
   };
   indicators: { rsi: number; vwap: number; atr: number };
+  candles?: Candle[];
+  timeframeSeconds?: number;
 }
 export interface Config {
   initialBRL: number;
@@ -47,6 +51,10 @@ export interface Position {
   target: number;
   entryFeeBRL: number;
   openedAt: number;
+  strategyId?: StrategyId;
+  signalCandleTime?: number;
+  timeframeSeconds?: number;
+  maxHoldingMs?: number;
 }
 export interface Trade extends Position {
   id: string;
@@ -68,11 +76,17 @@ export interface PaperState {
   lastSnapshotAt: number;
   locked: boolean;
   lockReason: string;
+  lastSignalCandleTime?: number;
 }
 export interface Step {
   state: PaperState;
   message: string;
   action: "HOLD" | "OPEN" | "CLOSE";
+}
+export interface PaperOptions {
+  decision: StrategyDecision;
+  signalCandleTime: number;
+  timeframeSeconds: number;
 }
 export function validateConfig(c: Config): void {
   if (
@@ -258,6 +272,7 @@ export function paperStep(
   now: number,
   allowEntry = true,
   forceClose = false,
+  options?: PaperOptions,
 ): Step {
   const hold = (message: string): Step => ({ state, action: "HOLD", message });
   const error = snapshotError(s, now);
@@ -278,7 +293,7 @@ export function paperStep(
       forceClose ||
       snap.bid <= p.stop ||
       snap.bid >= p.target ||
-      now - p.openedAt >= c.maxHoldingMs ||
+      now - p.openedAt >= (p.maxHoldingMs ?? c.maxHoldingMs) ||
       lossLimit ||
       targetLimit
     ) {
@@ -322,7 +337,14 @@ export function paperStep(
     return hold("Spread acima de 0,10%. Entrada vetada.");
   const i = snap.indicators;
   const midpoint = (snap.bid + snap.ask) / 2;
-  if (!(
+  if (options) {
+    if (![60,3600].includes(options.timeframeSeconds) || !Number.isFinite(options.signalCandleTime) || options.signalCandleTime < 0) return hold('Plano de estratégia inválido.');
+    const closedAt = (options.signalCandleTime + options.timeframeSeconds) * 1000;
+    if (closedAt > now || now - closedAt > 60000) return hold('Aguardando a abertura seguinte a um novo candle fechado; sinal antigo não será perseguido.');
+    if (options.signalCandleTime <= (state.lastSignalCandleTime ?? -1)) return hold('Este candle já originou uma entrada. Aguardando o próximo sinal.');
+    if (options.decision.action !== 'BUY') return hold(options.decision.reason);
+    if (!options.decision.strategyId || !options.decision.features || !Number.isFinite(options.decision.features.atr) || options.decision.features.atr <= 0 || !Number.isFinite(options.decision.stopAtr) || options.decision.stopAtr <= 0 || !Number.isFinite(options.decision.targetAtr) || options.decision.targetAtr <= options.decision.stopAtr) return hold('Plano de risco da estratégia inválido.');
+  } else if (!(
     snap.orderBook.buyerDominance >= 60 &&
     i.rsi >= 50 &&
     i.rsi <= 65 &&
@@ -334,8 +356,9 @@ export function paperStep(
   const slip = c.slippageBps / 10000;
   const fee = c.feeBps / 10000;
   const entry = snap.ask * (1 + slip);
-  const stop = entry - 1.5 * i.atr;
-  const target = entry + 3 * i.atr;
+  const atr = options?.decision.features?.atr ?? i.atr;
+  const stop = entry - (options?.decision.stopAtr ?? 1.5) * atr;
+  const target = entry + (options?.decision.targetAtr ?? 3) * atr;
   if (stop <= 0) return hold("Stop inválido. Entrada vetada.");
   const stopFill = stop * (1 - slip);
   const targetFill = target * (1 - slip);
@@ -359,6 +382,7 @@ export function paperStep(
       ...state,
       cashBRL: state.cashBRL - quantity * entry * c.usdBRL - entryFeeBRL,
       feesBRL: state.feesBRL + entryFeeBRL,
+      ...(options ? { lastSignalCandleTime: options.signalCandleTime } : {}),
       position: {
         symbol: snap.symbol,
         quantity,
@@ -367,6 +391,7 @@ export function paperStep(
         target,
         entryFeeBRL,
         openedAt: now,
+        ...(options ? { strategyId: options.decision.strategyId!, signalCandleTime: options.signalCandleTime, timeframeSeconds: options.timeframeSeconds, maxHoldingMs: 48 * options.timeframeSeconds * 1000 } : {}),
       },
     },
     action: "OPEN",

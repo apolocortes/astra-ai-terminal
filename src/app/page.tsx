@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from 'next/link';
 import {
   Activity,
   ArrowDownRight,
@@ -15,6 +16,8 @@ import {
   Wallet,
 } from "lucide-react";
 import TradingViewWidget from "@/components/trading-view-chart";
+import StrategyPanel from '@/components/strategy-panel';
+import { evaluateStrategies, type StrategyDecision, type StrategyMode } from '@/lib/strategy-engine';
 import {
   createPaperState,
   DEFAULT_CONFIG,
@@ -66,8 +69,15 @@ export default function AstraTerminal() {
   const [status, setStatus] = useState("Aguardando dados de mercado");
   const [now, setNow] = useState(0);
   const [storageError, setStorageError] = useState("");
+  const [strategyMode,setStrategyMode]=useState<StrategyMode>('auto');
+  const modeRef=useRef<StrategyMode>('auto');
+  const [timeframe,setTimeframe]=useState(3600);
+  const [decision,setDecision]=useState<StrategyDecision|null>(null);
+  const [ownsWallet,setOwnsWallet]=useState(false);
+  const ownershipRef=useRef(false);
 
   function persist() {
+    if(!ownershipRef.current)return;
     try {
       localStorage.setItem(
         STORAGE,
@@ -87,14 +97,26 @@ export default function AstraTerminal() {
   }
   function record(action: string, message: string, data: Snapshot | null) {
     setStatus(message);
-    const entry = { at: Date.now(), action, message, snapshot: data };
+    if(!ownershipRef.current)return;
+    const previous=logsRef.current.at(-1);
+    if(previous?.action===action && previous.message===message && Date.now()-previous.at<60000)return;
+    // Conservar metadados sem repetir120candles em cada evento e exceder a quota local.
+    const entry = { at: Date.now(), action, message, snapshot: data ? {...data,candles:undefined} : null };
     logsRef.current = [...logsRef.current, entry].slice(-300);
     setLogs(logsRef.current);
     persist();
   }
   useEffect(() => {
-    try {
+    let cancelled=false;let release:(()=>void)|undefined;
+    const controller=new AbortController();
+    const restore=()=>{try {
       const saved = localStorage.getItem(STORAGE);
+      const query=new URLSearchParams(window.location.search);
+      const requested=query.get('strategy');
+      if(requested&&['trend_pullback','range_reversion','breakout'].includes(requested)){
+        const parsed=saved?decodePaper(saved).session:null;
+        if(!parsed?.position){modeRef.current=requested as StrategyMode;setStrategyMode(requested as StrategyMode);setTimeframe(3600);}
+      }
       if (saved) {
         const restored = decodePaper(saved);
         const parsed = restored.session;
@@ -105,7 +127,7 @@ export default function AstraTerminal() {
         setConfig(parsed.config);
         logsRef.current = restored.evidence;
         setLogs(restored.evidence);
-        if (parsed.position) setSymbol(parsed.position.symbol);
+        if (parsed.position) { setSymbol(parsed.position.symbol); setTimeframe(parsed.position.timeframeSeconds ?? 60); }
         setStatus(
           "Sessão virtual restaurada. Entradas pausadas; posições abertas continuam sendo monitoradas.",
         );
@@ -115,9 +137,17 @@ export default function AstraTerminal() {
         "Sessão salva inválida ou armazenamento indisponível. Uma nova carteira virtual foi carregada.",
       );
     }
-    setReady(true);
+    };
+    restore();setReady(true);
+    if(navigator.locks){
+      void navigator.locks.request(STORAGE,{signal:controller.signal},async()=>{
+        if(cancelled)return;
+        ownershipRef.current=true;setOwnsWallet(true);restore();
+        await new Promise<void>(resolve=>{release=resolve;});
+      }).catch(()=>{});
+    }else setStorageError('Este navegador não suporta controle exclusivo de abas. A carteira ficará somente para consulta.');
     const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
+    return () => {cancelled=true;ownershipRef.current=false;controller.abort();release?.();clearInterval(timer);};
   }, []);
 
   useEffect(() => {
@@ -129,7 +159,7 @@ export default function AstraTerminal() {
     const poll = async () => {
       try {
         const response = await fetch(
-          `/api/live-depth?symbol=${encodeURIComponent(symbol)}`,
+          `/api/live-depth?symbol=${encodeURIComponent(symbol)}&granularity=${timeframe}`,
           { cache: "no-store", signal: controller.signal },
         );
         const data = await response.json();
@@ -139,11 +169,16 @@ export default function AstraTerminal() {
         const invalid = snapshotError(data, Date.now());
         if (invalid) throw new Error(invalid);
         setSnapshot(data);
+        const analysis=evaluateStrategies(data.candles||[],modeRef.current);
+        setDecision(analysis);
+        if(!ownershipRef.current)return;
         const result = paperStep(
           sessionRef.current,
           data,
           Date.now(),
           runningRef.current,
+          false,
+          {decision:analysis,signalCandleTime:data.candles?.at(-1)?.time ?? -1,timeframeSeconds:timeframe},
         );
         commit(result.state);
         if (result.state.locked) {
@@ -154,6 +189,7 @@ export default function AstraTerminal() {
       } catch (error) {
         if (cancelled) return;
         setSnapshot(null);
+        setDecision(null);
         record(
           "FEED_ERROR",
           error instanceof Error ? error.message : "Erro no feed.",
@@ -169,7 +205,7 @@ export default function AstraTerminal() {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [symbol, ready]);
+  }, [symbol, ready,timeframe]);
 
   const feedError = snapshotError(snapshot, now || Date.now());
   const equity = feedError
@@ -191,7 +227,7 @@ export default function AstraTerminal() {
     "w-full rounded-lg border border-slate-700 bg-[#080e19] px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-500 disabled:opacity-50";
 
   function toggle() {
-    if (session.locked) return;
+    if (session.locked || !ownershipRef.current) return;
     const next = !runningRef.current;
     runningRef.current = next;
     setRunning(next);
@@ -204,6 +240,7 @@ export default function AstraTerminal() {
     );
   }
   function apply() {
+    if(!ownershipRef.current)return;
     try {
       validateConfig(config);
       commit(createPaperState(config));
@@ -217,7 +254,7 @@ export default function AstraTerminal() {
     }
   }
   function reset() {
-    if (session.position || running) return;
+    if (session.position || running || !ownershipRef.current) return;
     if (
       hasHistory &&
       !window.confirm(
@@ -244,7 +281,9 @@ export default function AstraTerminal() {
       {
         exportedAt: new Date().toISOString(),
         mode: "PAPER_SPOT_ONLY",
-        strategy: "book-trend-v1-unvalidated",
+        strategy: strategyMode,
+        timeframeSeconds:timeframe,
+        decision,
         fxSource: "MANUAL_FIXED",
         warning:
           "Sem ordens reais. Resultados locais editáveis e não auditados. Logs incluem no máximo os últimos 300 eventos.",
@@ -282,6 +321,8 @@ export default function AstraTerminal() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            <Link href="/laboratorio" className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-cyan-300 hover:border-cyan-500">Laboratório histórico</Link>
+            <Link href="/metodologia" className="text-xs text-slate-400 hover:text-white">Como o robô decide</Link>
             <span className="rounded-full border border-amber-700/50 bg-amber-950/30 px-3 py-1.5 text-xs font-semibold text-amber-300">
               SIMULAÇÃO · SEM DINHEIRO REAL
             </span>
@@ -302,7 +343,7 @@ export default function AstraTerminal() {
             <strong>Dados de mercado reais. Carteira e ordens virtuais.</strong>{" "}
             Nenhum depósito é recebido aqui. A estratégia não tem rentabilidade
             comprovada. Taxas, perdas e slippage entram no resultado; R$ 30 não
-            viram renda garantida. Esta versão não opera na Capital.com.
+            viram renda garantida. Conta demo Capital.com ainda não conectada; o adaptador demo é separado da simulação spot.
           </p>
         </div>
         {storageError && (
@@ -310,6 +351,7 @@ export default function AstraTerminal() {
             {storageError}
           </p>
         )}
+        {!ownsWallet&&<p className="mb-4 rounded-lg border border-slate-700 p-3 text-sm text-slate-400" role="status">Carteira em consulta. Aguardando acesso exclusivo; se outra aba estiver aberta, feche-a para controlar esta sessão.</p>}
         <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
           {[
             { label: "PATRIMÔNIO VIRTUAL", value: equity, icon: Wallet },
@@ -352,7 +394,7 @@ export default function AstraTerminal() {
                 {SYMBOLS.map((s) => (
                   <button
                     key={s}
-                    disabled={!!session.position || running}
+                    disabled={!!session.position || running || !ownsWallet}
                     onClick={() => setSymbol(s)}
                     className={`flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-sm disabled:cursor-not-allowed ${s === symbol ? "border-cyan-700 bg-cyan-950/40 text-cyan-200" : "border-slate-800 text-slate-400 hover:border-slate-600"}`}
                   >
@@ -428,19 +470,20 @@ export default function AstraTerminal() {
                   {symbol} <span className="text-slate-500">/ Coinbase</span>
                 </h2>
                 <span className="text-xs text-slate-400">
-                  Gráfico indicativo · 1 minuto
+                  Gráfico indicativo · {timeframe===3600?'1 hora':'1 minuto'}
                 </span>
               </div>
               <div className="h-[420px]">
-                <TradingViewWidget symbol={symbol} />
+                <TradingViewWidget symbol={symbol} timeframeSeconds={timeframe}/>
               </div>
             </section>
+            <StrategyPanel decision={decision} mode={strategyMode} timeframe={timeframe} disabled={!!session.position||running||!ownsWallet} onMode={v=>{setStrategyMode(v);modeRef.current=v;setDecision(snapshot?.candles?evaluateStrategies(snapshot.candles,v):null);}} onTimeframe={v=>{setTimeframe(v);setDecision(null);}}/>
             <section className={`${panel} p-4`}>
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-sm font-semibold">Registro de decisões</h2>
                 <button
                   disabled={
-                    !ready || session.locked || (!running && !!feedError)
+                    !ready || !ownsWallet || session.locked || (!running && !!feedError)
                   }
                   onClick={toggle}
                   className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${running ? "bg-slate-700 text-white" : "bg-cyan-300 text-slate-950"}`}
@@ -450,7 +493,7 @@ export default function AstraTerminal() {
                     ? "Pausar entradas"
                     : session.locked
                       ? "Sessão bloqueada"
-                      : "Iniciar simulação"}
+                      : "Iniciar robô em paper"}
                 </button>
               </div>
               <p
@@ -512,7 +555,7 @@ export default function AstraTerminal() {
                     >
                       <div>
                         <p className="font-semibold">
-                          {t.symbol} · compra spot
+                          {t.symbol} · {t.strategyId||'legado'} · compra spot
                         </p>
                         <p className="mt-1 text-slate-500">
                           {t.reason} ·{" "}
@@ -571,7 +614,7 @@ export default function AstraTerminal() {
                       type="number"
                       step="0.01"
                       min={min}
-                      disabled={hasHistory || running}
+                      disabled={hasHistory || running || !ownsWallet}
                       value={config[key as keyof Config]}
                       onChange={(e) =>
                         setConfig((c) => ({
@@ -585,7 +628,7 @@ export default function AstraTerminal() {
               </div>
               <button
                 onClick={apply}
-                disabled={hasHistory || running}
+                disabled={hasHistory || running || !ownsWallet}
                 className="mt-4 w-full rounded-lg border border-cyan-800 py-2 text-xs font-semibold text-cyan-200 disabled:opacity-40"
               >
                 Aplicar parâmetros
@@ -609,7 +652,7 @@ export default function AstraTerminal() {
                     sem promessa ou obrigação
                   </strong>
                 </p>
-                <p>Cooldown: 60s · posição: até 15min</p>
+                <p>Uma entrada por candle · posição: até48candles; legado:15min</p>
               </div>
               <p className="mt-4 text-[11px] leading-relaxed text-amber-200/70">
                 Taxas e câmbio são hipóteses manuais, não tarifas verificadas da
@@ -640,7 +683,7 @@ export default function AstraTerminal() {
                     </div>
                   </dl>
                   <button
-                    disabled={!!feedError}
+                    disabled={!!feedError || !ownsWallet}
                     onClick={() => {
                       const result = paperStep(
                         sessionRef.current,
@@ -685,18 +728,18 @@ export default function AstraTerminal() {
                 >
                   {money(total)}
                 </span>
-                . Ainda não há backtest fora da amostra nem vantagem comprovada.
+                . O laboratório testa fora da amostra; vantagem ainda não comprovada.
                 A ausência de operação também é um resultado válido.
               </p>
               <p className="mt-3 text-xs text-slate-500">
                 RSI simples 14: {snapshot?.indicators.rsi.toFixed(1) ?? "—"}
                 <br />
-                VWAP móvel 30min: {price(snapshot?.indicators.vwap)}
+                VWAP móvel30candles: {price(snapshot?.indicators.vwap)}
                 <br />
                 ATR simples 14: {price(snapshot?.indicators.atr)}
               </p>
               <button
-                disabled={!!session.position || running}
+                disabled={!!session.position || running || !ownsWallet}
                 onClick={reset}
                 className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-slate-700 py-2 text-xs text-slate-400 disabled:opacity-30"
               >
@@ -710,7 +753,7 @@ export default function AstraTerminal() {
           Fonte: Coinbase Exchange REST; gráfico TradingView Coinbase. Polling a
           cada 5s após resposta, não alta frequência. Resultados e parâmetros
           ficam neste navegador e podem ser alterados; exportação não é
-          auditoria independente. Não armazenamos credenciais de corretora.
+          auditoria independente. Credenciais de corretora nunca são armazenadas nesta página. Para execução fora da aba, o projeto inclui worker paper próprio; ele precisa de um ambiente que permaneça ligado.
         </footer>
       </div>
     </main>

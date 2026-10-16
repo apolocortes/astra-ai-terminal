@@ -3,6 +3,8 @@ import { calculateIndicators, type Candle } from "@/lib/market-indicators";
 export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const symbol = new URL(req.url).searchParams.get("symbol") || "BTC-USD";
+  const granularity = Number(new URL(req.url).searchParams.get('granularity') || '60');
+  if (![60,3600].includes(granularity)) return NextResponse.json({success:false,error:'Timeframe inválido.'},{status:400});
   if (!/^[A-Z0-9]{2,12}-USD$/.test(symbol))
     return NextResponse.json(
       { success: false, error: "Produto USD inválido." },
@@ -23,13 +25,13 @@ export async function GET(req: Request) {
     };
     const requestedAt = Date.now();
     const start = encodeURIComponent(
-      new Date(requestedAt - 40 * 60000).toISOString(),
+      new Date(requestedAt - 125 * granularity * 1000).toISOString(),
     );
     const end = encodeURIComponent(new Date(requestedAt).toISOString());
     const [ticker, book, raw] = await Promise.all([
       get("ticker"),
       get("book?level=2"),
-      get(`candles?granularity=60&start=${start}&end=${end}`),
+      get(`candles?granularity=${granularity}&start=${start}&end=${end}`),
     ]);
     const now = Date.now();
     const levels = (rows: unknown) => {
@@ -80,15 +82,16 @@ export async function GET(req: Request) {
         close: Number(c[4]),
         volume: Number(c[5]),
       }))
-      .filter((c) => (c.time + 60) * 1000 <= now)
+      .filter((c) => (c.time + granularity) * 1000 <= now)
       .sort((a, b) => a.time - b.time)
-      .slice(-30);
+      .slice(-120);
     if (
       candles.length < 15 ||
-      now - (candles.at(-1)!.time + 60) * 1000 > 120000
+      now - (candles.at(-1)!.time + granularity) * 1000 > Math.max(120000,granularity*1000)
     )
       throw new Error("Histórico recente insuficiente.");
-    const indicators = calculateIndicators(candles);
+    calculateIndicators(candles,granularity);
+    const indicators = calculateIndicators(candles.slice(-30),granularity);
     const bidLiquidity = bids.reduce((n, b) => n + b.total, 0);
     const askLiquidity = asks.reduce((n, a) => n + a.total, 0);
     return NextResponse.json(
@@ -111,6 +114,8 @@ export async function GET(req: Request) {
           buyerDominance: (bidLiquidity / (bidLiquidity + askLiquidity)) * 100,
         },
         indicators,
+        candles,
+        timeframeSeconds: granularity,
         candleCount: candles.length,
         closedCandlesOnly: true,
       },

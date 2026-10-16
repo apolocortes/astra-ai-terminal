@@ -4,9 +4,10 @@ import { useEffect, useRef } from "react";
 
 interface TradingViewWidgetProps {
   symbol: string;
+  timeframeSeconds?: number;
 }
 
-export default function TradingViewWidget({ symbol }: TradingViewWidgetProps) {
+export default function TradingViewWidget({ symbol, timeframeSeconds = 60 }: TradingViewWidgetProps) {
   const container = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -25,7 +26,7 @@ export default function TradingViewWidget({ symbol }: TradingViewWidgetProps) {
     script.innerHTML = JSON.stringify({
       autosize: true,
       symbol: tvSymbol,
-      interval: "1",
+      interval: timeframeSeconds === 3600 ? '60' : '1',
       timezone: "America/Sao_Paulo",
       theme: "dark",
       style: "1",
@@ -42,7 +43,7 @@ export default function TradingViewWidget({ symbol }: TradingViewWidgetProps) {
     });
 
     container.current.appendChild(script);
-  }, [symbol]);
+  }, [symbol,timeframeSeconds]);
 
   return (
     <div className="w-full h-full min-h-[320px] flex-1 overflow-hidden bg-[#070a12]">

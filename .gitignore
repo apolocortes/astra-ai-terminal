@@ -4,3 +4,7 @@ node_modules/
 .env.*
 !.env.example
 *.tsbuildinfo
+
+.astra-paper/
+.astra-demo/
+.astra-research/

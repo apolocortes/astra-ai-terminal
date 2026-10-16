@@ -6,8 +6,9 @@ export interface Candle {
   close: number;
   volume: number;
 }
-export function calculateIndicators(candles: Candle[]) {
+export function calculateIndicators(candles: Candle[], timeframeSeconds = 60) {
   if (
+    ![60,3600].includes(timeframeSeconds) ||
     candles.length < 15 ||
     candles.some(
       (c, index) =>
@@ -19,7 +20,7 @@ export function calculateIndicators(candles: Candle[]) {
         c.close < c.low ||
         c.close > c.high ||
         c.volume < 0 ||
-        (index > 0 && c.time - candles[index - 1].time !== 60),
+        (index > 0 && c.time - candles[index - 1].time !== timeframeSeconds),
     )
   )
     throw new Error("Candles inválidos, duplicados ou não contíguos.");
