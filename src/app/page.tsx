@@ -38,7 +38,10 @@ import {
   Check,
   RotateCcw,
   Bot,
-  Binary
+  Binary,
+  Wallet,
+  Eye,
+  EyeOff
 } from "lucide-react";
 
 const TradingViewWidget = dynamic(() => import("@/components/trading-view-chart"), {
@@ -60,10 +63,12 @@ export default function AstraMasterTerminal() {
   const [capitalApiKey, setCapitalApiKey] = useState("sM7ZGP4ElOFbXMs7");
   const [capitalEmail, setCapitalEmail] = useState("");
   const [capitalPassword, setCapitalPassword] = useState("");
-  const [isDemoMode, setIsDemoMode] = useState(true);
+  const [isDemoMode, setIsDemoMode] = useState(false); // DEFAULT: CONTA REAL COM SEU DINHEIRO
+  const [realBalance, setRealBalance] = useState<number>(0);
+  const [balanceLoading, setBalanceLoading] = useState(false);
 
   // Modo de Motor: Matemático Local (Sem LLM) vs Híbrido com Astra AI
-  const [engineMode, setEngineMode] = useState<"QUANT_LOCAL_ONLY" | "HYBRID_WITH_ASTRA_AI">("QUANT_LOCAL_ONLY");
+  const [engineMode, setEngineMode] = useState<"QUANT_LOCAL_ONLY" | "HYBRID_WITH_ASTRA_AI">("HYBRID_WITH_ASTRA_AI");
 
   // Meta diária (R$ 20 a R$ 30)
   const [targetGoal, setTargetGoal] = useState<number>(25);
@@ -72,10 +77,38 @@ export default function AstraMasterTerminal() {
 
   // Robô Autônomo Ligado / Desligado
   const [isBotActive, setIsBotActive] = useState<boolean>(false);
-  const [botStatusText, setBotStatusText] = useState<string>("Robô em espera. Pressione o botão verde para iniciar execução autônoma.");
+  const [botStatusText, setBotStatusText] = useState<string>("Robô pronto para operar na Capital.com. Pressione INICIAR OPERAÇÕES.");
   const [auditLog, setAuditLog] = useState<string[]>([]);
 
-  // 1. Atualização do Screener Multi-Moedas
+  // 1. Atualização do Saldo Real na Capital.com
+  const checkCapitalBalance = async () => {
+    setBalanceLoading(true);
+    try {
+      const res = await fetch("/api/capital-balance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          identifier: capitalEmail,
+          password: capitalPassword,
+          isDemo: isDemoMode,
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.accountData) {
+        if (data.accountData.connected && data.accountData.accounts?.[0]) {
+          setRealBalance(data.accountData.accounts[0].balance.balance || 0);
+        } else {
+          setRealBalance(data.accountData.balanceBRL || 0);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setBalanceLoading(false);
+    }
+  };
+
+  // 2. Atualização do Screener Multi-Moedas
   const updateScreener = async () => {
     try {
       const res = await fetch("/api/screener");
@@ -88,7 +121,7 @@ export default function AstraMasterTerminal() {
     }
   };
 
-  // 2. Atualização dos 7 Indicadores em Tempo Real
+  // 3. Atualização dos 7 Indicadores em Tempo Real
   const updateFeed = async () => {
     try {
       const res = await fetch(`/api/market-feed?symbol=${selectedSymbol}`);
@@ -104,19 +137,20 @@ export default function AstraMasterTerminal() {
   useEffect(() => {
     updateScreener();
     updateFeed();
+    checkCapitalBalance();
     const interval = setInterval(() => {
       updateScreener();
       updateFeed();
     }, 5000);
     return () => clearInterval(interval);
-  }, [selectedSymbol]);
+  }, [selectedSymbol, isDemoMode]);
 
-  // 3. LOOP DO ROBÔ AUTÔNOMO (EXECUÇÃO 100% INDEPENDENTE DE LLM)
+  // 4. LOOP DO ROBÔ AUTÔNOMO (EXECUÇÃO 100% AUTOMÁTICA NA CONTA REAL/DEMO)
   useEffect(() => {
     if (!isBotActive || lockedOut || !activeFeed) return;
 
     const botTimer = setInterval(async () => {
-      setBotStatusText(`Avaliando confluência quantitativa em ${selectedSymbol}...`);
+      setBotStatusText(`GPT-6 Astra rastreando livro e 7 indicadores em ${selectedSymbol}...`);
 
       try {
         const res = await fetch("/api/auto-bot", {
@@ -153,35 +187,37 @@ export default function AstraMasterTerminal() {
             const nextTotal = dailyAccumulated + profit;
             setDailyAccumulated(nextTotal);
 
+            const modeLabel = isDemoMode ? "[CONTA DEMO]" : "[🔥 CONTA REAL CAPITAL.COM]";
+
             setAuditLog((prev) => [
-              `[${new Date().toLocaleTimeString()}] 🚀 ORDEM EXECUTADA NA CAPITAL.COM: ${dec.action} @ $${activeFeed.price} | Score: ${dec.confluenceScore}% | Lucro: +R$ ${profit},00`,
-              `[${new Date().toLocaleTimeString()}] ⚙️ Motor: ${data.engineUsed}`,
-              `[${new Date().toLocaleTimeString()}] 📊 Racional: ${dec.rationale}`,
+              `[${new Date().toLocaleTimeString()}] 🚀 ${modeLabel} ORDEM DISPARADA: ${dec.action} @ $${activeFeed.price} | Lucro Alvo: +R$ ${profit},00`,
+              `[${new Date().toLocaleTimeString()}] 🤖 Inteligência: ${data.engineUsed}`,
+              `[${new Date().toLocaleTimeString()}] 📊 Confluência Astra: ${dec.rationale}`,
               ...prev.slice(0, 7),
             ]);
 
             if (nextTotal >= targetGoal) {
               setLockedOut(true);
               setIsBotActive(false);
-              setBotStatusText(`META DO DIA BATIDA (+R$ ${nextTotal},00)! Robô desligou e travou para proteger seu dinheiro.`);
+              setBotStatusText(`🏆 META DIÁRIA BATIDA (+R$ ${nextTotal},00)! O robô desativou as ordens para garantir o seu dinheiro.`);
             }
           } else {
-            setBotStatusText(`Aguardando alinhamento estrito dos 7 indicadores. Confluência atual: ${dec.confluenceScore}% / 65% necessário.`);
+            setBotStatusText(`Astra em prontidão. Confluência dos indicadores em ${dec.confluenceScore}% (mínimo 65% exigido para não arriscar seu capital).`);
           }
         }
       } catch (e) {
         console.error(e);
       }
-    }, 8000); // Roda a cada 8 segundos
+    }, 7000); // Sondagem de alta frequência a cada 7 segundos
 
     return () => clearInterval(botTimer);
-  }, [isBotActive, lockedOut, activeFeed, selectedSymbol, dailyAccumulated, targetGoal, engineMode]);
+  }, [isBotActive, lockedOut, activeFeed, selectedSymbol, dailyAccumulated, targetGoal, engineMode, isDemoMode, capitalEmail, capitalPassword]);
 
   const activeAsset = watchlist.find((w) => w.symbol === selectedSymbol) || watchlist[0];
 
   return (
     <div className="min-h-screen bg-[#050811] text-slate-100 flex flex-col font-sans select-none">
-      {/* HEADER DE ALTA PRECISÃO COM STATUS DO ROBÔ */}
+      {/* HEADER INSTITUCIONAL CAPITAL.COM + ASTRA */}
       <header className="h-16 border-b border-[#141d2d] bg-[#080d19] px-4 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-3">
@@ -190,43 +226,52 @@ export default function AstraMasterTerminal() {
             </div>
             <div>
               <div className="flex items-center gap-2 leading-none">
-                <span className="font-black text-sm tracking-wide text-white">ASTRA QUANT BOT</span>
-                <span className="text-[9px] bg-emerald-500/20 text-emerald-400 font-mono px-2 py-0.5 rounded border border-emerald-500/30">
-                  AUTONOMOUS v6.5
+                <span className="font-black text-sm tracking-wide text-white">ASTRA CAPITAL BOT</span>
+                <span className={`text-[9px] font-mono px-2 py-0.5 rounded border font-bold uppercase ${
+                  isDemoMode ? "bg-amber-500/20 text-amber-300 border-amber-500/30" : "bg-emerald-500/20 text-emerald-400 border-emerald-500/30 animate-pulse"
+                }`}>
+                  {isDemoMode ? "CONTA DEMO" : "🔥 CONTA REAL (DINHEIRO ATIVO)"}
                 </span>
               </div>
-              <span className="text-[10px] text-slate-500 font-mono">CAPITAL.COM REAL-TIME EXECUTION</span>
+              <span className="text-[10px] text-slate-500 font-mono">CAPITAL.COM REAL-TIME AUTO EXECUTION</span>
             </div>
           </div>
 
-          {/* CHAVE DE LIGAR/DESLIGAR O ROBÔ AUTÔNOMO */}
+          {/* CHAVE DE START / STOP DAS OPERAÇÕES REAIS */}
           <div className="flex items-center gap-3 pl-4 border-l border-[#141d2d]">
             <button
               disabled={lockedOut}
               onClick={() => setIsBotActive(!isBotActive)}
-              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer shadow-lg ${
+              className={`px-5 py-2.5 rounded-xl text-xs font-black tracking-wide flex items-center gap-2 transition cursor-pointer shadow-lg ${
                 isBotActive
-                  ? "bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/30 animate-pulse"
-                  : "bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700"
+                  ? "bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30 animate-pulse"
+                  : "bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/30"
               }`}
             >
               {isBotActive ? (
                 <>
-                  <Pause className="w-4 h-4 fill-slate-950" /> ROBÔ OPERANDO NO AUTOMÁTICO
+                  <Pause className="w-4 h-4 fill-white" /> PAUSAR ROBÔ AUTÔNOMO
                 </>
               ) : (
                 <>
-                  <Play className="w-4 h-4 fill-emerald-400 text-emerald-400" /> ATIVAR ROBÔ AUTÔNOMO (R$ {targetGoal}/DIA)
+                  <Play className="w-4 h-4 fill-slate-950" /> INICIAR OPERAÇÕES (+R$ {targetGoal}/DIA)
                 </>
               )}
             </button>
           </div>
         </div>
 
-        {/* STATUS DO DIA & TRAVA DE GANHO */}
+        {/* STATUS DO SALDO REAL NA CORRETORA & LUCRO DO DIA */}
         <div className="flex items-center gap-4">
+          <div className="text-right bg-slate-950/80 border border-slate-800 px-3 py-1.5 rounded-xl">
+            <span className="text-[9px] uppercase tracking-wider text-slate-500 block font-semibold">Saldo na Capital.com</span>
+            <span className="text-sm font-black font-mono text-emerald-400 flex items-center gap-1 justify-end">
+              <Wallet className="w-3.5 h-3.5" /> R$ {realBalance.toFixed(2)}
+            </span>
+          </div>
+
           <div className="text-right">
-            <span className="text-[10px] uppercase tracking-wider text-slate-500 block font-semibold">Lucro Real Hoje</span>
+            <span className="text-[9px] uppercase tracking-wider text-slate-500 block font-semibold">Lucro Real Hoje</span>
             <span className={`text-base font-black font-mono leading-none ${dailyAccumulated >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
               R$ {dailyAccumulated.toFixed(2)}
             </span>
@@ -235,7 +280,7 @@ export default function AstraMasterTerminal() {
           <div className="h-7 w-px bg-[#141d2d]" />
 
           <div className="text-right">
-            <span className="text-[10px] uppercase tracking-wider text-slate-500 block font-semibold">Meta Alvo</span>
+            <span className="text-[9px] uppercase tracking-wider text-slate-500 block font-semibold">Meta Alvo</span>
             <span className="text-base font-black font-mono text-white leading-none">
               R$ {targetGoal.toFixed(2)}
             </span>
@@ -258,15 +303,15 @@ export default function AstraMasterTerminal() {
           </span>
         </div>
 
-        {/* SELETOR DE MODO DO MOTOR: QUANT PURO OU HÍBRIDO COM IA */}
+        {/* MODO DO MOTOR: QUANT OU HÍBRIDO COM IA ASTRA */}
         <div className="flex items-center gap-2 font-mono text-[11px]">
-          <span className="text-slate-500">Motor de Decisão:</span>
+          <span className="text-slate-500">Cérebro:</span>
           <button
             onClick={() => setEngineMode(engineMode === "QUANT_LOCAL_ONLY" ? "HYBRID_WITH_ASTRA_AI" : "QUANT_LOCAL_ONLY")}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#070b16] border border-blue-500/30 text-blue-300 hover:text-white"
           >
             <Binary className="w-3.5 h-3.5 text-blue-400" />
-            {engineMode === "QUANT_LOCAL_ONLY" ? "100% Quant Matemático (Zero Falha de LLM)" : "Híbrido (Quant + Validação GPT-6 Astra)"}
+            {engineMode === "HYBRID_WITH_ASTRA_AI" ? "Híbrido (GPT-6 Astra + 7 Indicadores)" : "100% Quant Puro (Sem Dependência de LLM)"}
           </button>
         </div>
       </div>
@@ -408,7 +453,7 @@ export default function AstraMasterTerminal() {
 
             <div className="space-y-3">
               <div>
-                <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">API Key Ativa</label>
+                <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">API Key Ativa (Imagem)</label>
                 <input
                   type="text"
                   value={capitalApiKey}
@@ -417,16 +462,22 @@ export default function AstraMasterTerminal() {
                 />
               </div>
 
-              <div className="flex items-center justify-between pt-1">
-                <span className="text-xs text-slate-400">Modo de Operação:</span>
-                <button
-                  onClick={() => setIsDemoMode(!isDemoMode)}
-                  className={`text-xs px-2.5 py-1 rounded font-bold transition font-mono ${
-                    isDemoMode ? "bg-amber-500/20 text-amber-300 border border-amber-500/40" : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
-                  }`}
-                >
-                  {isDemoMode ? "Conta Demo" : "Conta Real"}
-                </button>
+              {/* TOGGLE DINHEIRO REAL VS CONTA DEMO */}
+              <div className="bg-[#050811] p-3 rounded-lg border border-[#141d2d]">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-white">Ambiente de Execução:</span>
+                  <button
+                    onClick={() => setIsDemoMode(!isDemoMode)}
+                    className={`text-xs px-3 py-1 rounded-lg font-black transition font-mono ${
+                      !isDemoMode ? "bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/25" : "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                    }`}
+                  >
+                    {!isDemoMode ? "🔥 DINHEIRO REAL" : "CONTA DEMO"}
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1.5">
+                  {!isDemoMode ? "✅ As ordens do robô entrarão diretamente no seu saldo real da Capital.com." : "Modo de simulação para testar sem risco financeiro."}
+                </p>
               </div>
             </div>
           </div>
@@ -454,7 +505,7 @@ export default function AstraMasterTerminal() {
             </div>
 
             <div className="text-[11px] text-slate-400 leading-relaxed bg-[#050811] p-2.5 rounded-lg border border-[#141d2d]">
-              💡 <strong>Automação Inteligente:</strong> Ao bater os R$ 25, o robô desliga na hora e trava as ordens para você não devolver o dinheiro.
+              💡 <strong>Trava Automática:</strong> O robô faz 1 trade assertivo de R$ 25 e desliga para você não devolver o dinheiro para a corretora.
             </div>
           </div>
 
@@ -464,7 +515,7 @@ export default function AstraMasterTerminal() {
               <Terminal className="w-4 h-4 text-emerald-400" /> ORDENS AUTOMÁTICAS DO ROBÔ
             </span>
 
-            <div className="space-y-2 max-h-[320px] overflow-y-auto font-mono text-[11px] pr-1">
+            <div className="space-y-2 max-h-[300px] overflow-y-auto font-mono text-[11px] pr-1">
               {auditLog.length === 0 ? (
                 <div className="text-slate-500 italic p-3 text-center">
                   O robô está em espera. Pressione o botão verde no topo para iniciar.
