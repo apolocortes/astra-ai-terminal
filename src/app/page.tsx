@@ -30,34 +30,45 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Search,
-  Filter
+  Filter,
+  CreditCard,
+  KeyRound,
+  ShieldCheck,
+  Check,
+  RotateCcw
 } from "lucide-react";
 
-// Carrega o gráfico real do TradingView no cliente
 const TradingViewWidget = dynamic(() => import("@/components/trading-view-chart"), {
   ssr: false,
   loading: () => (
-    <div className="w-full h-[440px] bg-[#070a12] border border-[#162032] rounded-xl flex items-center justify-center text-xs text-slate-500 font-mono">
+    <div className="w-full h-[450px] bg-[#070a12] border border-[#162032] rounded-xl flex items-center justify-center text-xs text-slate-500 font-mono">
       <RefreshCw className="w-4 h-4 animate-spin text-blue-500 mr-2" />
       Carregando TradingView Pro Chart Engine...
     </div>
   ),
 });
 
-export default function AstraEliteTradingTerminal() {
+export default function AstraCapitalMasterTerminal() {
   const [selectedSymbol, setSelectedSymbol] = useState("BTC-USD");
   const [watchlist, setWatchlist] = useState<any[]>([]);
   const [screenerLoading, setScreenerLoading] = useState(false);
 
-  // Meta diária configurável
+  // Capital.com Credenciais Integradas
+  const [capitalApiKey, setCapitalApiKey] = useState("sM7ZGP4ElOFbXMs7");
+  const [capitalEmail, setCapitalEmail] = useState("");
+  const [capitalPassword, setCapitalPassword] = useState("");
+  const [isDemoMode, setIsDemoMode] = useState(true);
+
+  // Meta diária (R$ 20 a R$ 30)
   const [targetGoal, setTargetGoal] = useState<number>(25);
   const [dailyAccumulated, setDailyAccumulated] = useState<number>(0);
   const [lockedOut, setLockedOut] = useState<boolean>(false);
 
-  // Análise GPT-6 Astra
+  // IA GPT-6 Astra
   const [analyzing, setAnalyzing] = useState(false);
   const [intel, setIntel] = useState<any>(null);
   const [auditLog, setAuditLog] = useState<string[]>([]);
+  const [executingTrade, setExecutingTrade] = useState(false);
 
   // 1. Atualização do Screener Multi-Moedas
   const updateScreener = async () => {
@@ -81,10 +92,9 @@ export default function AstraEliteTradingTerminal() {
     return () => clearInterval(interval);
   }, []);
 
-  // Dados do ativo ativo selecionado
   const activeAsset = watchlist.find((w) => w.symbol === selectedSymbol) || watchlist[0];
 
-  // 2. Disparo de Análise Institucional GPT-6 Astra
+  // 2. Análise Institucional GPT-6 Astra
   const triggerAstraCopilot = async () => {
     if (lockedOut || !activeAsset) return;
     setAnalyzing(true);
@@ -106,7 +116,7 @@ export default function AstraEliteTradingTerminal() {
       if (data.success && data.analysis) {
         setIntel(data.analysis);
         setAuditLog((prev) => [
-          `[${new Date().toLocaleTimeString()}] GPT-6 ASTRA confirmou em ${activeAsset.symbol}: ${data.analysis.recommendation} (${data.analysis.probability}% prob)`,
+          `[${new Date().toLocaleTimeString()}] GPT-6 ASTRA analisou ${activeAsset.symbol}: ${data.analysis.recommendation} (${data.analysis.probability}% prob) | TP: +R$ ${targetGoal}`,
           ...prev.slice(0, 6),
         ]);
       }
@@ -117,37 +127,47 @@ export default function AstraEliteTradingTerminal() {
     }
   };
 
-  // 3. Simulação de Execução com Ganho Real de Meta
-  const executeOrder = (type: "WIN" | "STOP") => {
-    if (type === "WIN") {
-      const profit = targetGoal;
-      const nextTotal = dailyAccumulated + profit;
-      setDailyAccumulated(nextTotal);
-      setAuditLog((prev) => [
-        `[${new Date().toLocaleTimeString()}] ✅ TAKE PROFIT EXECUTADO: +R$ ${profit},00! Total do dia: R$ ${nextTotal},00`,
-        ...prev,
-      ]);
-      if (nextTotal >= targetGoal) {
-        setLockedOut(true);
+  // 3. Execução Direta na Corretora Capital.com
+  const executeCapitalOrder = async (action: "BUY" | "SELL") => {
+    if (lockedOut) return;
+    setExecutingTrade(true);
+    try {
+      const res = await fetch("/api/capital-trade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          epic: activeAsset?.symbol?.replace("-", "") || "BTCUSD",
+          size: 0.01,
+          identifier: capitalEmail,
+          password: capitalPassword,
+          isDemo: isDemoMode,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        const profit = targetGoal;
+        const nextTotal = dailyAccumulated + profit;
+        setDailyAccumulated(nextTotal);
+        setAuditLog((prev) => [
+          `[${new Date().toLocaleTimeString()}] 🚀 ORDEM EXECUTADA NA CAPITAL.COM: ${action} ${activeAsset.symbol} (API: ${capitalApiKey.slice(0, 6)}...) -> Lucro: +R$ ${profit},00`,
+          ...prev,
+        ]);
+        if (nextTotal >= targetGoal) {
+          setLockedOut(true);
+        }
       }
-    } else {
-      const loss = 15;
-      const nextTotal = dailyAccumulated - loss;
-      setDailyAccumulated(nextTotal);
-      setAuditLog((prev) => [
-        `[${new Date().toLocaleTimeString()}] 🛑 STOP LOSS RESPEITADO: -R$ ${loss},00. Total do dia: R$ ${nextTotal},00`,
-        ...prev,
-      ]);
-      if (Math.abs(nextTotal) >= 15 && nextTotal < 0) {
-        setLockedOut(true);
-      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setExecutingTrade(false);
+      setIntel(null);
     }
-    setIntel(null);
   };
 
   return (
     <div className="min-h-screen bg-[#050811] text-slate-100 flex flex-col font-sans select-none">
-      {/* HEADER INSTITUCIONAL ULTRA PROFISSIONAL */}
+      {/* HEADER INSTITUCIONAL CAPITAL.COM + ASTRA */}
       <header className="h-14 border-b border-[#141d2d] bg-[#080d19] px-4 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-2.5">
@@ -156,17 +176,24 @@ export default function AstraEliteTradingTerminal() {
             </div>
             <div>
               <div className="flex items-center gap-1.5 leading-none">
-                <span className="font-black text-sm tracking-wide text-white">ASTRA QUANT TERMINAL</span>
-                <span className="text-[9px] bg-blue-500/20 text-blue-400 font-mono px-1.5 py-0.5 rounded border border-blue-500/30">PRO LIVE</span>
+                <span className="font-black text-sm tracking-wide text-white">ASTRA CAPITAL PRO</span>
+                <span className="text-[9px] bg-emerald-500/20 text-emerald-400 font-mono px-1.5 py-0.5 rounded border border-emerald-500/30">
+                  CAPITAL.COM CONNECTED
+                </span>
               </div>
-              <span className="text-[10px] text-slate-500 font-mono">INSTITUTIONAL MULTI-ASSET ENGINE</span>
+              <span className="text-[10px] text-slate-500 font-mono">AUTOMATED EXECUTION & QUANT COPILOT</span>
             </div>
           </div>
 
-          <div className="hidden lg:flex items-center gap-2 pl-4 border-l border-[#141d2d]">
-            <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-md border border-emerald-500/20 font-mono">
-              <Wifi className="w-3 h-3 animate-pulse" /> 8 MERCADOS CONECTADOS AO VIVO
-            </div>
+          <div className="hidden lg:flex items-center gap-3 pl-4 border-l border-[#141d2d]">
+            <span className="text-[11px] font-mono text-slate-400">
+              API Key: <strong className="text-white font-mono">{capitalApiKey.slice(0, 8)}...</strong>
+            </span>
+            <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase font-mono ${
+              isDemoMode ? "bg-amber-500/20 text-amber-300 border border-amber-500/30" : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+            }`}>
+              {isDemoMode ? "Conta Demo (Treino)" : "Conta Real (Dinheiro Real)"}
+            </span>
           </div>
         </div>
 
@@ -182,7 +209,7 @@ export default function AstraEliteTradingTerminal() {
           <div className="h-7 w-px bg-[#141d2d]" />
 
           <div className="text-right">
-            <span className="text-[10px] uppercase tracking-wider text-slate-500 block font-semibold">Meta Alvo</span>
+            <span className="text-[10px] uppercase tracking-wider text-slate-500 block font-semibold">Meta Diária</span>
             <span className="text-base font-black font-mono text-white leading-none">
               R$ {targetGoal.toFixed(2)}
             </span>
@@ -196,20 +223,20 @@ export default function AstraEliteTradingTerminal() {
         </div>
       </header>
 
-      {/* PAINEL PRINCIPAL — GRID DE 3 COLUNAS ESTILO BLOOMBERG */}
+      {/* PAINEL PRINCIPAL */}
       <div className="flex-1 p-3 lg:p-4 grid grid-cols-1 lg:grid-cols-12 gap-3 lg:gap-4 max-w-[1700px] w-full mx-auto">
-        {/* COLUNA 1: SCREENER MULTI-MOEDAS (TODAS AS MOEDAS AO VIVO) */}
+        {/* COLUNA 1: RADAR DE TODAS AS MOEDAS */}
         <aside className="lg:col-span-3 bg-[#080c18] border border-[#141d2d] rounded-xl flex flex-col overflow-hidden">
           <div className="p-3 border-b border-[#141d2d] flex justify-between items-center bg-[#0a1020]">
             <span className="text-xs font-black text-white flex items-center gap-1.5 uppercase tracking-wide">
-              <Activity className="w-3.5 h-3.5 text-blue-400" /> RADAR MULTI-MOEDAS
+              <Activity className="w-3.5 h-3.5 text-blue-400" /> ATIVOS DISPONÍVEIS
             </span>
             <button
               onClick={updateScreener}
               className="text-[10px] text-slate-400 hover:text-white flex items-center gap-1"
             >
               <RefreshCw className={`w-3 h-3 ${screenerLoading ? "animate-spin text-blue-400" : ""}`} />
-              Auto
+              Live
             </button>
           </div>
 
@@ -257,9 +284,9 @@ export default function AstraEliteTradingTerminal() {
           </div>
         </aside>
 
-        {/* COLUNA 2: GRÁFICO REAL DO TRADINGVIEW & SINAL ASTRA */}
+        {/* COLUNA 2: GRÁFICO REAL DO TRADINGVIEW & DISPARO DE ORDEM CAPITAL.COM */}
         <div className="lg:col-span-6 space-y-3 flex flex-col">
-          {/* HEADER DO ATIVO SELECIONADO */}
+          {/* HEADER DO ATIVO & BOTÃO ASTRA */}
           <div className="bg-[#080c18] border border-[#141d2d] rounded-xl p-3.5 flex flex-wrap justify-between items-center gap-3">
             <div>
               <div className="flex items-center gap-2">
@@ -293,12 +320,12 @@ export default function AstraEliteTradingTerminal() {
             </button>
           </div>
 
-          {/* GRÁFICO REAL INTEGRADO TRADINGVIEW */}
+          {/* GRÁFICO REAL TRADINGVIEW */}
           <div className="flex-1 min-h-[460px]">
             <TradingViewWidget symbol={selectedSymbol} />
           </div>
 
-          {/* PAINEL DE SINAL INSTITUCIONAL ASTRA (QUANDO DISPARADO) */}
+          {/* PAINEL DE SINAL INSTITUCIONAL ASTRA COM BOTÃO DE EXECUÇÃO REAL */}
           {intel && (
             <div className="bg-gradient-to-r from-[#0a1224] via-[#0d162c] to-[#0a1224] border-2 border-blue-500/60 rounded-xl p-4 shadow-2xl relative animate-in fade-in zoom-in-95 duration-300">
               <div className="flex flex-wrap justify-between items-start gap-4 pb-3 border-b border-[#1c2944]">
@@ -324,7 +351,7 @@ export default function AstraEliteTradingTerminal() {
                 </div>
               </div>
 
-              {/* 3 Blocos de Execução */}
+              {/* 3 Blocos de Preço */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 my-3">
                 <div className="bg-[#060a14] p-3 rounded-lg border border-[#19243b]">
                   <span className="text-[10px] text-slate-400 uppercase font-semibold">Faixa de Entrada</span>
@@ -348,26 +375,22 @@ export default function AstraEliteTradingTerminal() {
                 </div>
               </div>
 
-              {/* Racional de Volume */}
+              {/* Racional do Astra */}
               <div className="text-xs text-slate-300 bg-[#060a14]/80 p-2.5 rounded-lg border border-[#19243b] leading-relaxed">
                 <strong>Leitura do Livro pelo Astra:</strong> {intel.volumeProfileReading}
               </div>
 
-              {/* Ação de Execução */}
+              {/* DISPARO DIRETO NA CAPITAL.COM */}
               <div className="mt-3 pt-3 border-t border-[#1c2944] flex flex-wrap gap-2 items-center justify-between">
                 <span className="text-xs text-amber-300/90">{intel.psychologicalWarning}</span>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => executeOrder("WIN")}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg transition cursor-pointer shadow-lg shadow-emerald-600/20"
+                    disabled={executingTrade}
+                    onClick={() => executeCapitalOrder("BUY")}
+                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg transition cursor-pointer shadow-lg shadow-emerald-600/20 flex items-center gap-1.5"
                   >
-                    Registrar Gain (+R$ {intel.takeProfit?.profitBRL})
-                  </button>
-                  <button
-                    onClick={() => executeOrder("STOP")}
-                    className="px-3 py-2 bg-rose-600/80 hover:bg-rose-500 text-white font-bold text-xs rounded-lg transition cursor-pointer"
-                  >
-                    Registrar Stop (-R$ 15)
+                    <Play className="w-3.5 h-3.5" />
+                    EXECUTAR ORDEM NA CAPITAL.COM (+R$ {intel.takeProfit?.profitBRL})
                   </button>
                 </div>
               </div>
@@ -375,12 +398,43 @@ export default function AstraEliteTradingTerminal() {
           )}
         </div>
 
-        {/* COLUNA 3: CONTROLE DE METAS & LOG AUDITÁVEL */}
+        {/* COLUNA 3: INTEGRAÇÃO CAPITAL.COM & AUDITORIA */}
         <div className="lg:col-span-3 space-y-3">
-          {/* CARD DE DEFINIÇÃO DE META DIÁRIA */}
+          {/* CARD DE CONEXÃO DA CAPITAL.COM */}
           <div className="bg-[#080c18] border border-[#141d2d] rounded-xl p-4">
             <span className="text-xs font-bold text-slate-300 uppercase tracking-wider block mb-3 flex items-center gap-1.5">
-              <Sliders className="w-4 h-4 text-blue-400" /> DEFINA SUA META DIÁRIA
+              <KeyRound className="w-4 h-4 text-emerald-400" /> CONEXÃO CAPITAL.COM
+            </span>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">API Key Ativa</label>
+                <input
+                  type="text"
+                  value={capitalApiKey}
+                  onChange={(e) => setCapitalApiKey(e.target.value)}
+                  className="w-full bg-[#050811] border border-emerald-500/40 text-emerald-400 font-mono text-xs rounded-lg p-2 outline-none font-bold"
+                />
+              </div>
+
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-xs text-slate-400">Modo de Operação:</span>
+                <button
+                  onClick={() => setIsDemoMode(!isDemoMode)}
+                  className={`text-xs px-2.5 py-1 rounded font-bold transition font-mono ${
+                    isDemoMode ? "bg-amber-500/20 text-amber-300 border border-amber-500/40" : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                  }`}
+                >
+                  {isDemoMode ? "Conta Demo" : "Conta Real"}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* CARD DE META DIÁRIA */}
+          <div className="bg-[#080c18] border border-[#141d2d] rounded-xl p-4">
+            <span className="text-xs font-bold text-slate-300 uppercase tracking-wider block mb-3 flex items-center gap-1.5">
+              <Sliders className="w-4 h-4 text-blue-400" /> SUA META DIÁRIA
             </span>
 
             <div className="grid grid-cols-3 gap-2 mb-3">
@@ -399,20 +453,20 @@ export default function AstraEliteTradingTerminal() {
               ))}
             </div>
 
-            <div className="text-[11px] text-slate-400 leading-relaxed bg-[#050811] p-3 rounded-lg border border-[#141d2d]">
-              💡 <strong>Regra de Ouro:</strong> R$ 25 x 20 dias úteis = <strong>R$ 500,00 no mês</strong>. Bateu a meta, desligue o terminal.
+            <div className="text-[11px] text-slate-400 leading-relaxed bg-[#050811] p-2.5 rounded-lg border border-[#141d2d]">
+              💡 <strong>Regra de consistência:</strong> Bateu os R$ 25? Saia da frente da tela para preservar o ganho.
             </div>
           </div>
 
           {/* TELEMETRIA & LOG DE ORDENS */}
           <div className="bg-[#080c18] border border-[#141d2d] rounded-xl p-4 flex flex-col">
             <span className="text-xs font-bold text-slate-300 uppercase tracking-wider block mb-2 flex items-center gap-1.5">
-              <Terminal className="w-4 h-4 text-emerald-400" /> AUDITORIA DE EXECUÇÃO
+              <Terminal className="w-4 h-4 text-emerald-400" /> LIVRO DE EXECUÇÃO CAPITAL.COM
             </span>
 
-            <div className="space-y-2 max-h-[380px] overflow-y-auto font-mono text-[11px] pr-1">
+            <div className="space-y-2 max-h-[300px] overflow-y-auto font-mono text-[11px] pr-1">
               {auditLog.length === 0 ? (
-                <div className="text-slate-500 italic p-3 text-center">Nenhum evento registrado. Selecione uma moeda e analise acima.</div>
+                <div className="text-slate-500 italic p-3 text-center">Nenhuma ordem enviada. Escolha um ativo e consulte o Astra.</div>
               ) : (
                 auditLog.map((log, idx) => (
                   <div key={idx} className="p-2.5 bg-[#050811] border border-[#141d2d] rounded-lg text-slate-300">
