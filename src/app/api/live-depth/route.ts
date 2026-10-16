@@ -1,116 +1,134 @@
 import { NextResponse } from "next/server";
-
+import { calculateIndicators, type Candle } from "@/lib/market-indicators";
 export const dynamic = "force-dynamic";
-
 export async function GET(req: Request) {
+  const symbol = new URL(req.url).searchParams.get("symbol") || "BTC-USD";
+  const granularity = Number(new URL(req.url).searchParams.get('granularity') || '60');
+  if (![60,3600].includes(granularity)) return NextResponse.json({success:false,error:'Timeframe inválido.'},{status:400});
+  if (!/^[A-Z0-9]{2,12}-USD$/.test(symbol))
+    return NextResponse.json(
+      { success: false, error: "Produto USD inválido." },
+      { status: 400 },
+    );
   try {
-    const { searchParams } = new URL(req.url);
-    const symbol = searchParams.get("symbol") || "BTC-USD";
-
-    // Puxa ticker real e livro de ofertas real (Level 2)
-    const [tickerRes, bookRes, candlesRes] = await Promise.all([
-      fetch(`https://api.exchange.coinbase.com/products/${symbol}/ticker`, {
-        headers: { "User-Agent": "AntigravityHFT/3.0" },
-        next: { revalidate: 2 },
-      }),
-      fetch(`https://api.exchange.coinbase.com/products/${symbol}/book?level=2`, {
-        headers: { "User-Agent": "AntigravityHFT/3.0" },
-        next: { revalidate: 2 },
-      }),
-      fetch(`https://api.exchange.coinbase.com/products/${symbol}/candles?granularity=60`, {
-        headers: { "User-Agent": "AntigravityHFT/3.0" },
-        next: { revalidate: 2 },
-      }),
-    ]);
-
-    if (!tickerRes.ok || !bookRes.ok || !candlesRes.ok) {
-      throw new Error("Falha ao comunicar com provedor institucional");
-    }
-
-    const ticker = await tickerRes.json();
-    const book = await bookRes.json();
-    const candlesRaw = await candlesRes.json();
-
-    const currentPrice = parseFloat(ticker.price);
-    const bidPrice = parseFloat(ticker.bid);
-    const askPrice = parseFloat(ticker.ask);
-    const spread = parseFloat((askPrice - bidPrice).toFixed(2));
-    const volume24h = parseFloat(ticker.volume);
-
-    // Formata os 6 melhores bids e asks reais do Order Book
-    const topBids = (book.bids || []).slice(0, 6).map((b: any) => ({
-      price: parseFloat(b[0]),
-      size: parseFloat(b[1]),
-      total: parseFloat((parseFloat(b[0]) * parseFloat(b[1])).toFixed(2)),
-    }));
-
-    const topAsks = (book.asks || []).slice(0, 6).map((a: any) => ({
-      price: parseFloat(a[0]),
-      size: parseFloat(a[1]),
-      total: parseFloat((parseFloat(a[0]) * parseFloat(a[1])).toFixed(2)),
-    }));
-
-    // PressÃ£o Compradora vs Vendedora no Book (% Order Book Imbalance)
-    const bidLiquidity = topBids.reduce((acc: number, b: any) => acc + b.total, 0);
-    const askLiquidity = topAsks.reduce((acc: number, a: any) => acc + a.total, 0);
-    const totalLiquidity = bidLiquidity + askLiquidity || 1;
-    const buyerDominance = Math.round((bidLiquidity / totalLiquidity) * 100);
-
-    // CÃ¡lculos de Indicadores em candles de 1 minuto
-    const candles = candlesRaw.slice(0, 30).reverse();
-    const closes: number[] = candles.map((c: any) => parseFloat(c[4]));
-    
-    // RSI 14
-    let gains = 0, losses = 0;
-    for (let i = 1; i <= Math.min(14, closes.length - 1); i++) {
-      const d = closes[i] - closes[i - 1];
-      if (d >= 0) gains += d; else losses -= d;
-    }
-    const rs = (gains / 14) / ((losses / 14) || 0.001);
-    const rsi = parseFloat((100 - (100 / (1 + rs))).toFixed(1));
-
-    // VWAP
-    let tv = 0, v = 0;
-    candles.forEach((c: any) => {
-      tv += ((parseFloat(c[1]) + parseFloat(c[2]) + parseFloat(c[4])) / 3) * parseFloat(c[5]);
-      v += parseFloat(c[5]);
-    });
-    const vwap = v > 0 ? parseFloat((tv / v).toFixed(2)) : currentPrice;
-
-    // ATR
-    let trSum = 0;
-    for (let i = 1; i < candles.length; i++) {
-      const tr = Math.max(
-        parseFloat(candles[i][2]) - parseFloat(candles[i][1]),
-        Math.abs(parseFloat(candles[i][2]) - parseFloat(candles[i - 1][4]))
+    const get = async (path: string) => {
+      const res = await fetch(
+        `https://api.exchange.coinbase.com/products/${symbol}/${path}`,
+        {
+          cache: "no-store",
+          signal: AbortSignal.timeout(7000),
+          headers: { "User-Agent": "AstraPaperResearch/2.0" },
+        },
       );
-      trSum += tr;
-    }
-    const atr = parseFloat((trSum / (candles.length - 1 || 1)).toFixed(2));
-
-    return NextResponse.json({
-      success: true,
-      timestamp: Date.now(),
-      symbol,
-      price: currentPrice,
-      bid: bidPrice,
-      ask: askPrice,
-      spread,
-      volume24h,
-      orderBook: {
-        bids: topBids,
-        asks: topAsks,
-        bidLiquidity: Math.round(bidLiquidity),
-        askLiquidity: Math.round(askLiquidity),
-        buyerDominance,
+      if (!res.ok) throw new Error("Provedor de mercado indisponível.");
+      return res.json();
+    };
+    const requestedAt = Date.now();
+    const start = encodeURIComponent(
+      new Date(requestedAt - 125 * granularity * 1000).toISOString(),
+    );
+    const end = encodeURIComponent(new Date(requestedAt).toISOString());
+    const [ticker, book, raw] = await Promise.all([
+      get("ticker"),
+      get("book?level=2"),
+      get(`candles?granularity=${granularity}&start=${start}&end=${end}`),
+    ]);
+    const now = Date.now();
+    const levels = (rows: unknown) => {
+      if (!Array.isArray(rows) || rows.length === 0)
+        throw new Error("Livro de ofertas vazio.");
+      return rows.slice(0, 6).map((row) => {
+        const price = Number(row[0]);
+        const size = Number(row[1]);
+        if (
+          !Number.isFinite(price) ||
+          !Number.isFinite(size) ||
+          price <= 0 ||
+          size <= 0
+        )
+          throw new Error("Livro inválido.");
+        return { price, size, total: price * size };
+      });
+    };
+    const bids = levels(book.bids);
+    const asks = levels(book.asks);
+    const bid = bids[0].price;
+    const ask = asks[0].price;
+    const price = Number(ticker.price);
+    const tickerTimestamp = Date.parse(ticker.time);
+    const bookTimestamp = Date.parse(book.time);
+    const marketTimestamp = Math.min(tickerTimestamp, bookTimestamp);
+    if (tickerTimestamp > now + 2000 || bookTimestamp > now + 2000)
+      throw new Error("Relógio do provedor inconsistente.");
+    if (
+      !Number.isFinite(price) ||
+      price <= 0 ||
+      ask < bid ||
+      !Number.isFinite(marketTimestamp) ||
+      now - marketTimestamp > 60000 ||
+      marketTimestamp > now + 2000
+    )
+      throw new Error("Cotação antiga ou inconsistente.");
+    const midpoint = (bid + ask) / 2;
+    if (Math.abs(price - midpoint) / midpoint > 0.01)
+      throw new Error("Ticker incoerente com o livro.");
+    if (!Array.isArray(raw)) throw new Error("Candles indisponíveis.");
+    const candles: Candle[] = raw
+      .map((c: number[]) => ({
+        time: Number(c[0]),
+        low: Number(c[1]),
+        high: Number(c[2]),
+        open: Number(c[3]),
+        close: Number(c[4]),
+        volume: Number(c[5]),
+      }))
+      .filter((c) => (c.time + granularity) * 1000 <= now)
+      .sort((a, b) => a.time - b.time)
+      .slice(-120);
+    if (
+      candles.length < 15 ||
+      now - (candles.at(-1)!.time + granularity) * 1000 > Math.max(120000,granularity*1000)
+    )
+      throw new Error("Histórico recente insuficiente.");
+    calculateIndicators(candles,granularity);
+    const indicators = calculateIndicators(candles.slice(-30),granularity);
+    const bidLiquidity = bids.reduce((n, b) => n + b.total, 0);
+    const askLiquidity = asks.reduce((n, a) => n + a.total, 0);
+    return NextResponse.json(
+      {
+        success: true,
+        source: "Coinbase Exchange REST · spot USD",
+        timestamp: now,
+        marketTimestamp,
+        symbol,
+        price,
+        bid,
+        ask,
+        spread: ask - bid,
+        volume24h: Number(ticker.volume),
+        orderBook: {
+          bids,
+          asks,
+          bidLiquidity,
+          askLiquidity,
+          buyerDominance: (bidLiquidity / (bidLiquidity + askLiquidity)) * 100,
+        },
+        indicators,
+        candles,
+        timeframeSeconds: granularity,
+        candleCount: candles.length,
+        closedCandlesOnly: true,
       },
-      indicators: {
-        rsi,
-        vwap,
-        atr,
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  } catch {
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          "Feed indisponível ou inválido. A simulação não abrirá entradas sem dados recentes.",
       },
-    });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+      { status: 502 },
+    );
   }
 }

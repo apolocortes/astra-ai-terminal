@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "ASTRA TERMINAL — AI Institutional Trading Engine",
-  description: "Terminal institucional de inteligência quantitativa com motor GPT-6 Astra em tempo real para Day Trade de alta precisão.",
+  title: "ASTRA LAB — Simulação transparente de estratégias",
+  description:
+    "Laboratório de simulação spot com dados Coinbase, custos, perdas e evidências exportáveis. Sem ordens reais ou promessa de rentabilidade.",
 };
 
 export default function RootLayout({

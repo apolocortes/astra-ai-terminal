@@ -1,570 +1,760 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import Link from 'next/link';
 import {
   Activity,
-  TrendingUp,
-  TrendingDown,
-  ShieldAlert,
-  Zap,
-  Target,
-  BarChart3,
-  RefreshCw,
-  Cpu,
-  Lock,
-  Play,
-  Square,
-  KeyRound,
-  Sliders,
-  DollarSign,
-  CheckCircle2,
-  AlertTriangle,
-  Flame,
-  Award,
-  ArrowUpRight,
   ArrowDownRight,
-  Maximize2,
-  Sparkles,
-  Layers,
-  Bot,
+  ArrowUpRight,
+  Download,
+  FlaskConical,
+  Pause,
+  Play,
   Radio,
-  Eye,
-  SlidersHorizontal,
-  ChevronRight,
+  RotateCcw,
+  ShieldCheck,
   Wallet,
-  Globe2,
-  Database,
-  Terminal as TerminalIcon,
-  Search,
-  Radar,
-  BrainCircuit,
-  Coins
 } from "lucide-react";
 import TradingViewWidget from "@/components/trading-view-chart";
+import StrategyPanel from '@/components/strategy-panel';
+import { evaluateStrategies, type StrategyDecision, type StrategyMode } from '@/lib/strategy-engine';
+import {
+  createPaperState,
+  DEFAULT_CONFIG,
+  equityBRL,
+  paperStep,
+  snapshotError,
+  validateConfig,
+  type Config,
+  type PaperState,
+  type Snapshot,
+} from "@/lib/paper-engine";
+import { decodePaper, encodePaper, type Evidence } from "@/lib/paper-storage";
+
+const STORAGE = "astra-paper-v1";
+const SYMBOLS = [
+  "BTC-USD",
+  "ETH-USD",
+  "SOL-USD",
+  "AVAX-USD",
+  "LINK-USD",
+  "DOGE-USD",
+  "XRP-USD",
+];
+const money = (value: number | null) =>
+  value === null
+    ? "—"
+    : value.toLocaleString("pt-BR", {
+        style: "currency",
+        currency: "BRL",
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 4,
+      });
+const price = (value?: number) =>
+  value === undefined
+    ? "—"
+    : value.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
 export default function AstraTerminal() {
-  const [selectedSymbol, setSelectedSymbol] = useState("BTC-USD");
-  const [radarAssets, setRadarAssets] = useState<any[]>([]);
-  const [liveDepth, setLiveDepth] = useState<any>(null);
-  
-  // ParÃ¢metros de Capital Real Depositado (ex: R$ 30)
-  const [depositCapital, setDepositCapital] = useState<number>(30); // Capital Inicial em R$
-  const [currentCapital, setCurrentCapital] = useState<number>(30); // Saldo DinÃ¢mico
-  const [targetGoal, setTargetGoal] = useState<number>(25); // Meta do dia em R$
-  const [sessionPnL, setSessionPnL] = useState<number>(0);
-  
-  // Estado Cognitivo do RobÃ´
-  const [isBotRunning, setIsBotRunning] = useState(false);
-  const [goalReached, setGoalReached] = useState(false);
-  const [botPhase, setBotPhase] = useState<string>("AGUARDANDO INÃCIO");
-  const [thoughtStream, setThoughtStream] = useState<string[]>([
-    `[${new Date().toLocaleTimeString()}] Sistema conectado Ã  rede global. Pressione 'INICIAR OPERAÃ‡Ã•ES' para comeÃ§ar a varredura e execuÃ§Ãµes imediatas.`,
-  ]);
-  
-  // Controle de Corretora Capital.com
-  const [isDemoMode, setIsDemoMode] = useState(false);
-  const [capitalApiKey, setCapitalApiKey] = useState("sM7ZGP4ElOFbXMs7");
-  const [capitalEmail, setCapitalEmail] = useState("");
-  const [capitalPassword, setCapitalPassword] = useState("");
-  
-  // HistÃ³rico de ExecuÃ§Ãµes Reais
-  const [executedTrades, setExecutedTrades] = useState<any[]>([]);
+  const [session, setSession] = useState<PaperState>(() => createPaperState());
+  const sessionRef = useRef(session);
+  const [config, setConfig] = useState<Config>({ ...DEFAULT_CONFIG });
+  const [symbol, setSymbol] = useState("BTC-USD");
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [running, setRunning] = useState(false);
+  const runningRef = useRef(false);
+  const [ready, setReady] = useState(false);
+  const [logs, setLogs] = useState<Evidence[]>([]);
+  const logsRef = useRef<Evidence[]>([]);
+  const [status, setStatus] = useState("Aguardando dados de mercado");
+  const [now, setNow] = useState(0);
+  const [storageError, setStorageError] = useState("");
+  const [strategyMode,setStrategyMode]=useState<StrategyMode>('auto');
+  const modeRef=useRef<StrategyMode>('auto');
+  const [timeframe,setTimeframe]=useState(3600);
+  const [decision,setDecision]=useState<StrategyDecision|null>(null);
+  const [ownsWallet,setOwnsWallet]=useState(false);
+  const ownershipRef=useRef(false);
 
-  // 1. Carrega Screener Geral
-  const fetchScreener = async () => {
+  function persist() {
+    if(!ownershipRef.current)return;
     try {
-      const res = await fetch("/api/screener");
-      if (res.ok) {
-        const data = await res.json();
-        setRadarAssets(data.assets || []);
-      }
-    } catch (e) {}
-  };
-
-  // 2. Carrega Livro de Ofertas e PreÃ§o Real ao Vivo
-  const fetchDepth = async () => {
-    try {
-      const res = await fetch(`/api/live-depth?symbol=${selectedSymbol}`);
-      if (res.ok) {
-        const data = await res.json();
-        setLiveDepth(data);
-      }
-    } catch (e) {}
-  };
-
-  useEffect(() => {
-    fetchScreener();
-    fetchDepth();
-    const interval = setInterval(() => {
-      fetchScreener();
-      fetchDepth();
-    }, 2500);
-    return () => clearInterval(interval);
-  }, [selectedSymbol]);
-
-  // 3. EXECUÃ‡ÃƒO IMEDIATA E CONTÃNUA ASSIM QUE O USUÃRIO CLICA EM INICIAR
-  const isRunningRef = useRef(isBotRunning);
-  isRunningRef.current = isBotRunning;
-  const goalReachedRef = useRef(goalReached);
-  goalReachedRef.current = goalReached;
-
-  useEffect(() => {
-    if (!isBotRunning) {
-      setBotPhase("PAUSADO");
-      return;
+      localStorage.setItem(
+        STORAGE,
+        encodePaper(sessionRef.current, logsRef.current),
+      );
+      setStorageError("");
+    } catch {
+      setStorageError(
+        "Não foi possível salvar esta sessão no navegador. Exporte os dados antes de sair.",
+      );
     }
+  }
+  function commit(next: PaperState) {
+    sessionRef.current = next;
+    setSession(next);
+    persist();
+  }
+  function record(action: string, message: string, data: Snapshot | null) {
+    setStatus(message);
+    if(!ownershipRef.current)return;
+    const previous=logsRef.current.at(-1);
+    if(previous?.action===action && previous.message===message && Date.now()-previous.at<60000)return;
+    // Conservar metadados sem repetir120candles em cada evento e exceder a quota local.
+    const entry = { at: Date.now(), action, message, snapshot: data ? {...data,candles:undefined} : null };
+    logsRef.current = [...logsRef.current, entry].slice(-300);
+    setLogs(logsRef.current);
+    persist();
+  }
+  useEffect(() => {
+    let cancelled=false;let release:(()=>void)|undefined;
+    const controller=new AbortController();
+    const restore=()=>{try {
+      const saved = localStorage.getItem(STORAGE);
+      const query=new URLSearchParams(window.location.search);
+      const requested=query.get('strategy');
+      if(requested&&['trend_pullback','range_reversion','breakout'].includes(requested)){
+        const parsed=saved?decodePaper(saved).session:null;
+        if(!parsed?.position){modeRef.current=requested as StrategyMode;setStrategyMode(requested as StrategyMode);setTimeframe(3600);}
+      }
+      if (saved) {
+        const restored = decodePaper(saved);
+        const parsed = restored.session;
+        if (parsed.position && !SYMBOLS.includes(parsed.position.symbol))
+          throw new Error("Ativo salvo não suportado.");
+        sessionRef.current = parsed;
+        setSession(parsed);
+        setConfig(parsed.config);
+        logsRef.current = restored.evidence;
+        setLogs(restored.evidence);
+        if (parsed.position) { setSymbol(parsed.position.symbol); setTimeframe(parsed.position.timeframeSeconds ?? 60); }
+        setStatus(
+          "Sessão virtual restaurada. Entradas pausadas; posições abertas continuam sendo monitoradas.",
+        );
+      }
+    } catch {
+      setStorageError(
+        "Sessão salva inválida ou armazenamento indisponível. Uma nova carteira virtual foi carregada.",
+      );
+    }
+    };
+    restore();setReady(true);
+    if(navigator.locks){
+      void navigator.locks.request(STORAGE,{signal:controller.signal},async()=>{
+        if(cancelled)return;
+        ownershipRef.current=true;setOwnsWallet(true);restore();
+        await new Promise<void>(resolve=>{release=resolve;});
+      }).catch(()=>{});
+    }else setStorageError('Este navegador não suporta controle exclusivo de abas. A carteira ficará somente para consulta.');
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => {cancelled=true;ownershipRef.current=false;controller.abort();release?.();clearInterval(timer);};
+  }, []);
 
-    setBotPhase("DISCOVERY ATIVO");
-    const startTime = new Date().toLocaleTimeString();
-    setThoughtStream((prev) => [
-      `[${startTime}] ðŸš€ MOTOR DE TRADING INICIADO! Escaneando fluxo em tempo real...`,
-      ...prev,
-    ]);
-
-    const runTradingStep = async () => {
-      if (!isRunningRef.current || goalReachedRef.current) return;
-
-      const time = new Date().toLocaleTimeString();
-      const currentPrice = liveDepth?.price || 81650;
-      const dominance = liveDepth?.orderBook?.buyerDominance || 54;
-      const rsi = liveDepth?.indicators?.rsi || 48;
-
-      // DISCOVERY & ANÃLISE DE FLUXO
-      setBotPhase("AVALIANDO LIVRO");
-      setThoughtStream((prev) => [
-        `[${time}] ðŸ”Ž DISCOVERY: ${selectedSymbol} a $${currentPrice.toLocaleString()} | Livro Comprador: ${dominance}% | RSI: ${rsi}`,
-        ...prev.slice(0, 15),
-      ]);
-
-      await new Promise((r) => setTimeout(r, 1200));
-
-      if (!isRunningRef.current || goalReachedRef.current) return;
-
-      // DECISÃƒO DE ENTRADA INTELIGENTE
-      setBotPhase("CALCULANDO MICRO-SCALP");
-      const isBuyOpportunity = dominance >= 50 || rsi < 52;
-      const action = isBuyOpportunity ? "BUY" : "SELL";
-      
-      const profitTrade = Math.round((Math.random() * 2.8 + 4.2) * 100) / 100; // Lucro de R$ 4,20 a R$ 7,00 por entrada
-      
-      setBotPhase("ORDEM EXECUTADA");
-      setSessionPnL((prevPnL) => {
-        const nextPnL = Math.round((prevPnL + profitTrade) * 100) / 100;
-        setCurrentCapital((prevCap) => Math.round((depositCapital + nextPnL) * 100) / 100);
-
-        setExecutedTrades((prev) => [
-          {
-            id: Date.now(),
-            time,
-            symbol: selectedSymbol,
-            action,
-            entryPrice: currentPrice,
-            profitBRL: `+R$ ${profitTrade.toFixed(2)}`,
-            pnl: profitTrade,
-            rationale: `${action === "BUY" ? "Compra" : "Venda"} institucional confirmada por desbalanceamento do Order Book (${dominance}% dominÃ¢ncia).`,
-          },
-          ...prev,
-        ]);
-
-        setThoughtStream((prev) => [
-          `[${time}] âš¡ ORDEM DISPARADA: ${action} em $${currentPrice.toLocaleString()}! Ganho LÃ­quido: +R$ ${profitTrade.toFixed(2)} | PnL Acumulado: +R$ ${nextPnL.toFixed(2)}`,
-          ...prev.slice(0, 15),
-        ]);
-
-        if (nextPnL >= targetGoal) {
-          setGoalReached(true);
-          setIsBotRunning(false);
-          setBotPhase("META CONCLUÃDA");
-          setThoughtStream((prev) => [
-            `[${time}] ðŸ”’ AUTO-LOCK DE LUCRO ATIVADO! Meta diÃ¡ria de +R$ ${nextPnL.toFixed(2)} foi atingida. RobÃ´ pausado para proteger seu saldo.`,
-            ...prev.slice(0, 15),
-          ]);
+  useEffect(() => {
+    if (!ready) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const controller = new AbortController();
+    setSnapshot(null);
+    const poll = async () => {
+      try {
+        const response = await fetch(
+          `/api/live-depth?symbol=${encodeURIComponent(symbol)}&granularity=${timeframe}`,
+          { cache: "no-store", signal: controller.signal },
+        );
+        const data = await response.json();
+        if (cancelled) return;
+        if (!response.ok || data.success !== true || data.symbol !== symbol)
+          throw new Error("Feed indisponível. Nenhuma entrada autorizada.");
+        const invalid = snapshotError(data, Date.now());
+        if (invalid) throw new Error(invalid);
+        setSnapshot(data);
+        const analysis=evaluateStrategies(data.candles||[],modeRef.current);
+        setDecision(analysis);
+        if(!ownershipRef.current)return;
+        const result = paperStep(
+          sessionRef.current,
+          data,
+          Date.now(),
+          runningRef.current,
+          false,
+          {decision:analysis,signalCandleTime:data.candles?.at(-1)?.time ?? -1,timeframeSeconds:timeframe},
+        );
+        commit(result.state);
+        if (result.state.locked) {
+          runningRef.current = false;
+          setRunning(false);
         }
-
-        return nextPnL;
-      });
+        record(result.action, result.message, data);
+      } catch (error) {
+        if (cancelled) return;
+        setSnapshot(null);
+        setDecision(null);
+        record(
+          "FEED_ERROR",
+          error instanceof Error ? error.message : "Erro no feed.",
+          null,
+        );
+      } finally {
+        if (!cancelled) timer = setTimeout(poll, 5000);
+      }
     };
-
-    // Dispara a primeira operaÃ§Ã£o quase de imediato (apÃ³s 1.5s) e depois roda a cada 4.5s
-    const firstTimeout = setTimeout(runTradingStep, 1500);
-    const loopInterval = setInterval(runTradingStep, 5000);
-
+    void poll();
     return () => {
-      clearTimeout(firstTimeout);
-      clearInterval(loopInterval);
+      cancelled = true;
+      controller.abort();
+      clearTimeout(timer);
     };
-  }, [isBotRunning, selectedSymbol, depositCapital, targetGoal]);
+  }, [symbol, ready,timeframe]);
+
+  const feedError = snapshotError(snapshot, now || Date.now());
+  const equity = feedError
+    ? session.position
+      ? null
+      : session.cashBRL
+    : equityBRL(session, snapshot);
+  const unrealized =
+    equity === null
+      ? null
+      : equity - session.config.initialBRL - session.realizedBRL;
+  const total = equity === null ? null : equity - session.config.initialBRL;
+  const age = snapshot
+    ? Math.max(0, Math.floor(((now || Date.now()) - snapshot.timestamp) / 1000))
+    : null;
+  const hasHistory = !!session.position || session.trades.length > 0;
+  const panel = "rounded-2xl border border-slate-800 bg-[#0b1220]";
+  const input =
+    "w-full rounded-lg border border-slate-700 bg-[#080e19] px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-500 disabled:opacity-50";
+
+  function toggle() {
+    if (session.locked || !ownershipRef.current) return;
+    const next = !runningRef.current;
+    runningRef.current = next;
+    setRunning(next);
+    record(
+      next ? "START" : "PAUSE",
+      next
+        ? "Simulação iniciada. Entradas dependem de confluência e custos; não existe operação obrigatória."
+        : "Novas entradas pausadas. Posição virtual aberta continua monitorada.",
+      snapshot,
+    );
+  }
+  function apply() {
+    if(!ownershipRef.current)return;
+    try {
+      validateConfig(config);
+      commit(createPaperState(config));
+      record(
+        "CONFIG",
+        "Parâmetros aplicados à nova carteira virtual. USD/BRL é um valor manual, não cotação ao vivo.",
+        null,
+      );
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : "Parâmetros inválidos.");
+    }
+  }
+  function reset() {
+    if (session.position || running || !ownershipRef.current) return;
+    if (
+      hasHistory &&
+      !window.confirm(
+        "Reiniciar a carteira apaga o histórico local desta simulação. Exporte os resultados primeiro. Continuar?",
+      )
+    )
+      return;
+    try {
+      validateConfig(config);
+      commit(createPaperState(config));
+      logsRef.current = [];
+      setLogs([]);
+      record(
+        "RESET",
+        "Nova sessão virtual. Histórico anterior não foi combinado com os novos resultados.",
+        null,
+      );
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : "Parâmetros inválidos.");
+    }
+  }
+  function exportEvidence() {
+    const body = JSON.stringify(
+      {
+        exportedAt: new Date().toISOString(),
+        mode: "PAPER_SPOT_ONLY",
+        strategy: strategyMode,
+        timeframeSeconds:timeframe,
+        decision,
+        fxSource: "MANUAL_FIXED",
+        warning:
+          "Sem ordens reais. Resultados locais editáveis e não auditados. Logs incluem no máximo os últimos 300 eventos.",
+        session,
+        evidence: logsRef.current,
+      },
+      null,
+      2,
+    );
+    const url = URL.createObjectURL(
+      new Blob([body], { type: "application/json" }),
+    );
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `astra-paper-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   return (
-    <main className="min-h-screen bg-[#02050b] text-slate-100 flex flex-col font-sans selection:bg-cyan-500/30 selection:text-cyan-200">
-      
-      {/* 1. BARRA SUPERIOR INSTITUCIONAL BLOOMBERG */}
-      <header className="border-b border-cyan-950/40 bg-[#050814]/90 backdrop-blur-xl px-5 py-3 sticky top-0 z-50 flex items-center justify-between gap-4">
-        
-        {/* Identidade e Status do Motor */}
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 via-blue-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-cyan-500/25 border border-cyan-400/40">
-              <BrainCircuit className="w-5 h-5 text-white animate-pulse" />
+    <main className="min-h-screen bg-[#060b14] text-slate-100">
+      <header className="border-b border-slate-800 px-4 py-5 sm:px-8">
+        <div className="mx-auto flex max-w-[1500px] flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl border border-cyan-700/40 bg-cyan-950/40 p-3">
+              <Activity className="h-6 w-6 text-cyan-300" />
             </div>
-            <span className={`absolute -bottom-1 -right-1 w-3.5 h-3.5 border-2 border-[#02050b] rounded-full ${isBotRunning ? "bg-emerald-500 animate-ping" : "bg-slate-600"}`} />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-black tracking-wider text-base bg-gradient-to-r from-cyan-300 via-sky-200 to-indigo-300 bg-clip-text text-transparent">
-                ASTRA AUTONOMOUS TRADER
-              </span>
-              <span className="text-[10px] font-bold font-mono tracking-widest bg-cyan-950 text-cyan-400 border border-cyan-800/60 px-2 py-0.5 rounded">
-                COGNITIVE QUANT
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
-              <span>Status: </span>
-              <strong className={`font-mono font-bold ${isBotRunning ? "text-emerald-400" : "text-amber-400"}`}>{botPhase}</strong>
-            </p>
-          </div>
-        </div>
-
-        {/* Rastreador de Saldo e Meta DiÃ¡ria */}
-        <div className="flex items-center gap-3 font-mono">
-          
-          <div className="hidden sm:flex items-center gap-3 bg-[#080d1c] border border-cyan-900/30 rounded-lg px-3.5 py-1.5">
             <div>
-              <span className="text-[9px] text-slate-400 block font-sans font-semibold">SALDO ATUAL</span>
-              <span className="text-sm font-bold text-white">R$ {currentCapital.toFixed(2)}</span>
-            </div>
-            <div className="h-6 w-px bg-slate-800" />
-            <div>
-              <span className="text-[9px] text-slate-400 block font-sans font-semibold">LUCRO SESSÃƒO</span>
-              <span className={`text-sm font-bold ${sessionPnL > 0 ? "text-emerald-400" : "text-slate-400"}`}>
-                +R$ {sessionPnL.toFixed(2)}
-              </span>
-            </div>
-            <div className="h-6 w-px bg-slate-800" />
-            <div>
-              <span className="text-[9px] text-slate-400 block font-sans font-semibold">META DO DIA</span>
-              <span className="text-sm font-bold text-cyan-400">R$ {targetGoal.toFixed(2)}</span>
-            </div>
-          </div>
-
-          {/* BotÃ£o de IgniÃ§Ã£o */}
-          <button
-            onClick={() => {
-              if (goalReached) {
-                setGoalReached(false);
-                setSessionPnL(0);
-                setCurrentCapital(depositCapital);
-              }
-              setIsBotRunning(!isBotRunning);
-            }}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-xs font-black tracking-wider uppercase transition-all shadow-lg ${
-              isBotRunning
-                ? "bg-rose-500 hover:bg-rose-600 text-white shadow-rose-500/25 animate-pulse"
-                : goalReached
-                ? "bg-amber-500 hover:bg-amber-600 text-slate-950 shadow-amber-500/25"
-                : "bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/25"
-            }`}
-          >
-            {isBotRunning ? (
-              <>
-                <Square className="w-3.5 h-3.5 fill-current" />
-                CONGELAR ROBÃ”
-              </>
-            ) : goalReached ? (
-              <>
-                <Award className="w-3.5 h-3.5" />
-                META BATIDA (RESET)
-              </>
-            ) : (
-              <>
-                <Play className="w-3.5 h-3.5 fill-current" />
-                INICIAR OPERAÃ‡Ã•ES
-              </>
-            )}
-          </button>
-        </div>
-      </header>
-
-      {/* 2. ALERTA DE AUTO-LOCK DE META */}
-      {goalReached && (
-        <div className="bg-gradient-to-r from-emerald-950/90 via-teal-900/90 to-emerald-950/90 border-b border-emerald-500/40 px-6 py-2.5 flex items-center justify-between text-xs font-medium text-emerald-200">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-            <span>
-              <strong>AUTO-LOCK ATIVADO:</strong> Meta diÃ¡ria de <strong>+R$ {sessionPnL.toFixed(2)}</strong> batida! O robÃ´ bloqueou novas ordens para vocÃª nÃ£o devolver o lucro Ã  corretora.
-            </span>
-          </div>
-          <button
-            onClick={() => {
-              setGoalReached(false);
-              setSessionPnL(0);
-            }}
-            className="text-[11px] font-bold underline hover:text-white"
-          >
-            Definir PrÃ³xima Meta
-          </button>
-        </div>
-      )}
-
-      {/* 3. WORKSPACE PRINCIPAL */}
-      <div className="flex-1 p-4 lg:p-6 max-w-[1700px] mx-auto w-full grid grid-cols-1 lg:grid-cols-12 gap-5">
-        
-        {/* COLUNA ESQUERDA: RADAR DE MERCADO & LIVRO DE OFERTAS REAL (3 COLUNAS) */}
-        <div className="lg:col-span-3 flex flex-col gap-4">
-          
-          {/* Radar Multiativos */}
-          <div className="bg-[#050814] border border-slate-800/80 rounded-xl p-4 shadow-xl">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                <Radar className="w-3.5 h-3.5 text-cyan-400" />
-                Scanner Multiativo
-              </span>
-              <span className="text-[10px] font-mono text-emerald-400">Tempo Real</span>
-            </div>
-
-            <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-1">
-              {radarAssets.map((asset) => {
-                const isSelected = selectedSymbol === asset.symbol;
-                return (
-                  <button
-                    key={asset.symbol}
-                    onClick={() => setSelectedSymbol(asset.symbol)}
-                    className={`w-full p-2.5 rounded-lg border text-left transition-all flex items-center justify-between ${
-                      isSelected
-                        ? "bg-cyan-950/40 border-cyan-500/60 shadow-lg shadow-cyan-950/40"
-                        : "bg-[#090e1f] border-slate-800/60 hover:bg-[#0c1328]"
-                    }`}
-                  >
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-bold text-xs text-white font-mono">{asset.symbol}</span>
-                      </div>
-                      <span className="text-[10px] text-slate-400">RSI: {asset.rsi}</span>
-                    </div>
-
-                    <div className="text-right">
-                      <div className="text-xs font-mono font-bold text-slate-100">
-                        ${asset.price ? asset.price.toLocaleString() : "---"}
-                      </div>
-                      <div className={`text-[10px] font-mono font-bold ${asset.change24h >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                        {asset.change24h >= 0 ? "+" : ""}{asset.change24h}%
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Livro de Ofertas Real (Level 2 Order Book) */}
-          <div className="bg-[#050814] border border-slate-800/80 rounded-xl p-4 shadow-xl space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                <Database className="w-3.5 h-3.5 text-cyan-400" />
-                Livro de Ofertas Real (L2)
-              </span>
-              <span className="text-[9px] font-mono bg-cyan-950 text-cyan-400 border border-cyan-800 px-1 rounded">
-                LIVE DEPTH
-              </span>
-            </div>
-
-            {/* Asks (Vendedores) */}
-            <div className="space-y-1 font-mono text-[10px]">
-              {(liveDepth?.orderBook?.asks || []).slice(0, 3).reverse().map((ask: any, i: number) => (
-                <div key={i} className="flex justify-between text-rose-400/90 bg-rose-950/20 px-2 py-0.5 rounded">
-                  <span>${ask.price.toFixed(2)}</span>
-                  <span>{ask.size} BTC</span>
-                </div>
-              ))}
-            </div>
-
-            {/* PreÃ§o de Spread Central */}
-            <div className="py-1 px-2.5 bg-[#090e1f] rounded border border-slate-800 flex justify-between items-center text-xs font-mono">
-              <span className="text-slate-400 text-[10px]">Spread de Mercado:</span>
-              <span className="font-bold text-cyan-300">${liveDepth?.spread || "0.01"}</span>
-            </div>
-
-            {/* Bids (Compradores) */}
-            <div className="space-y-1 font-mono text-[10px]">
-              {(liveDepth?.orderBook?.bids || []).slice(0, 3).map((bid: any, i: number) => (
-                <div key={i} className="flex justify-between text-emerald-400/90 bg-emerald-950/20 px-2 py-0.5 rounded">
-                  <span>${bid.price.toFixed(2)}</span>
-                  <span>{bid.size} BTC</span>
-                </div>
-              ))}
-            </div>
-
-            {/* DominÃ¢ncia de PressÃ£o */}
-            <div className="space-y-1 pt-1">
-              <div className="flex justify-between text-[10px] font-mono">
-                <span className="text-emerald-400">Compradores: {liveDepth?.orderBook?.buyerDominance || 50}%</span>
-                <span className="text-rose-400">Vendedores: {100 - (liveDepth?.orderBook?.buyerDominance || 50)}%</span>
-              </div>
-              <div className="w-full bg-rose-900/40 h-1.5 rounded-full overflow-hidden flex">
-                <div
-                  className="bg-emerald-500 h-full transition-all duration-500"
-                  style={{ width: `${liveDepth?.orderBook?.buyerDominance || 50}%` }}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* COLUNA CENTRAL: GRÃFICO & STREAM DE EXECUÃ‡ÃƒO AO VIVO (6 COLUNAS) */}
-        <div className="lg:col-span-6 flex flex-col gap-4">
-          
-          {/* GrÃ¡fico TradingView Oficial */}
-          <div className="bg-[#050814] border border-slate-800/80 rounded-xl overflow-hidden shadow-2xl h-[360px] flex flex-col">
-            <div className="bg-[#080d1c] px-4 py-2 border-b border-slate-800/80 flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2">
-                <BarChart3 className="w-4 h-4 text-cyan-400" />
-                <span className="font-bold text-slate-200">{selectedSymbol} Â· Feed de Alta FrequÃªncia</span>
-              </div>
-              <span className="text-[10px] font-mono text-emerald-400 font-bold">CANDLES 1-MINUTO</span>
-            </div>
-            
-            <div className="flex-1 w-full h-full">
-              <TradingViewWidget symbol={selectedSymbol} />
-            </div>
-          </div>
-
-          {/* DISCOVERY LOG: STREAM DE RACIOCÃNIO E ORDENS IMEDIATAS */}
-          <div className="bg-[#050814] border border-cyan-900/40 rounded-xl p-4 shadow-xl flex-1 flex flex-col min-h-[240px]">
-            <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-800">
-              <span className="text-xs font-bold text-cyan-300 uppercase tracking-wider flex items-center gap-1.5">
-                <TerminalIcon className="w-3.5 h-3.5 text-cyan-400" />
-                Stream de RaciocÃ­nio & DecisÃ£o AutÃ´noma
-              </span>
-              <span className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
-                <span className={`w-2 h-2 rounded-full ${isBotRunning ? "bg-emerald-400 animate-ping" : "bg-slate-600"}`} />
-                {isBotRunning ? "Varrendo a cada 5s" : "Aguardando InÃ­cio"}
-              </span>
-            </div>
-
-            <div className="flex-1 overflow-y-auto max-h-[190px] font-mono text-[11px] space-y-1.5 pr-1">
-              {thoughtStream.map((thought, i) => (
-                <div key={i} className="text-slate-300 leading-relaxed">
-                  {thought}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* COLUNA DIREITA: GESTÃƒO DO CAPITAL DE R$ 30 & HISTÃ“RICO DE ORDENS (3 COLUNAS) */}
-        <div className="lg:col-span-3 flex flex-col gap-4">
-          
-          {/* Painel do Capital Real Depositado (R$ 30) */}
-          <div className="bg-[#050814] border border-cyan-900/40 rounded-xl p-4 shadow-xl space-y-3.5">
-            <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
-              <Coins className="w-3.5 h-3.5 text-cyan-400" />
-              GestÃ£o de DepÃ³sito
-            </span>
-
-            <div className="space-y-2">
-              <label className="text-[10px] text-slate-400 uppercase font-semibold block">Capital Inicial</label>
-              <div className="relative">
-                <span className="absolute left-3 top-2.5 text-xs text-slate-400 font-bold">R$</span>
-                <input
-                  type="number"
-                  value={depositCapital}
-                  onChange={(e) => {
-                    const val = parseFloat(e.target.value) || 0;
-                    setDepositCapital(val);
-                    setCurrentCapital(val + sessionPnL);
-                  }}
-                  className="w-full bg-[#090e1f] border border-cyan-800/50 text-white font-mono text-base font-bold rounded-lg pl-9 pr-3 py-2 outline-none"
-                />
-              </div>
-              <p className="text-[9px] text-slate-500">
-                Ordens micro-scalp calculadas automaticamente para preservar sua margem.
+              <h1 className="text-xl font-bold tracking-[.18em]">
+                ASTRA <span className="text-cyan-300">LAB</span>
+              </h1>
+              <p className="text-xs text-slate-400">
+                Pesquisa de estratégia · evidência antes de capital
               </p>
             </div>
-
-            {/* Meta DiÃ¡ria */}
-            <div className="pt-2 border-t border-slate-800">
-              <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-2">Meta de Lucro:</span>
-              <div className="grid grid-cols-3 gap-1.5 font-mono text-xs font-bold">
-                {[20, 25, 30].map((v) => (
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Link href="/laboratorio" className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-cyan-300 hover:border-cyan-500">Laboratório histórico</Link>
+            <Link href="/metodologia" className="text-xs text-slate-400 hover:text-white">Como o robô decide</Link>
+            <span className="rounded-full border border-amber-700/50 bg-amber-950/30 px-3 py-1.5 text-xs font-semibold text-amber-300">
+              SIMULAÇÃO · SEM DINHEIRO REAL
+            </span>
+            <button
+              onClick={exportEvidence}
+              className="flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-xs hover:border-cyan-500"
+            >
+              <Download size={15} />
+              Exportar evidências
+            </button>
+          </div>
+        </div>
+      </header>
+      <div className="mx-auto max-w-[1500px] px-4 py-6 sm:px-8">
+        <div className="mb-6 flex gap-3 rounded-xl border border-amber-800/40 bg-amber-950/20 p-4 text-sm text-amber-100">
+          <FlaskConical className="mt-0.5 shrink-0 text-amber-400" size={20} />
+          <p>
+            <strong>Dados de mercado reais. Carteira e ordens virtuais.</strong>{" "}
+            Nenhum depósito é recebido aqui. A estratégia não tem rentabilidade
+            comprovada. Taxas, perdas e slippage entram no resultado; R$ 30 não
+            viram renda garantida. Conta demo Capital.com ainda não conectada; o adaptador demo é separado da simulação spot.
+          </p>
+        </div>
+        {storageError && (
+          <p role="alert" className="mb-4 text-sm text-rose-300">
+            {storageError}
+          </p>
+        )}
+        {!ownsWallet&&<p className="mb-4 rounded-lg border border-slate-700 p-3 text-sm text-slate-400" role="status">Carteira em consulta. Aguardando acesso exclusivo; se outra aba estiver aberta, feche-a para controlar esta sessão.</p>}
+        <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {[
+            { label: "PATRIMÔNIO VIRTUAL", value: equity, icon: Wallet },
+            {
+              label: "RESULTADO REALIZADO",
+              value: session.realizedBRL,
+              icon: ArrowUpRight,
+            },
+            {
+              label: "RESULTADO EM ABERTO",
+              value: unrealized,
+              icon: ArrowDownRight,
+            },
+            {
+              label: "TAXAS PAGAS NA SIMULAÇÃO",
+              value: session.feesBRL,
+              icon: ShieldCheck,
+            },
+          ].map(({ label, value, icon: Icon }) => (
+            <div key={label} className={`${panel} p-4`}>
+              <div className="mb-3 flex items-center justify-between gap-2 text-[10px] tracking-wider text-slate-400">
+                <span>{label}</span>
+                <Icon size={16} />
+              </div>
+              <p
+                className={`font-mono text-lg font-semibold sm:text-2xl ${value !== null && value < 0 ? "text-rose-400" : "text-slate-100"}`}
+              >
+                {money(value)}
+              </p>
+            </div>
+          ))}
+        </div>
+        <div className="grid items-start gap-5 xl:grid-cols-[250px_minmax(0,1fr)_300px]">
+          <aside className="space-y-5">
+            <section className={`${panel} p-4`}>
+              <h2 className="mb-4 text-xs font-semibold tracking-wider text-slate-300">
+                MERCADO SPOT · USD
+              </h2>
+              <div className="space-y-2">
+                {SYMBOLS.map((s) => (
                   <button
-                    key={v}
-                    onClick={() => setTargetGoal(v)}
-                    className={`py-1.5 rounded-lg border transition-all ${
-                      targetGoal === v
-                        ? "bg-cyan-600 text-white border-cyan-400 shadow-md"
-                        : "bg-[#090e1f] text-slate-400 border-slate-800"
-                    }`}
+                    key={s}
+                    disabled={!!session.position || running || !ownsWallet}
+                    onClick={() => setSymbol(s)}
+                    className={`flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-sm disabled:cursor-not-allowed ${s === symbol ? "border-cyan-700 bg-cyan-950/40 text-cyan-200" : "border-slate-800 text-slate-400 hover:border-slate-600"}`}
                   >
-                    +R$ {v}
+                    {s}
+                    <span className="font-mono text-xs">
+                      {s === symbol ? price(snapshot?.price) : "→"}
+                    </span>
                   </button>
                 ))}
               </div>
-            </div>
-          </div>
-
-          {/* ConexÃ£o com Capital.com */}
-          <div className="bg-[#050814] border border-slate-800/80 rounded-xl p-4 shadow-xl space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
-                <KeyRound className="w-3.5 h-3.5 text-cyan-400" />
-                Mesa Capital.com
-              </span>
-              <button
-                onClick={() => setIsDemoMode(!isDemoMode)}
-                className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded ${
-                  !isDemoMode ? "bg-emerald-500 text-slate-950 font-black" : "bg-amber-500/20 text-amber-300"
-                }`}
-              >
-                {!isDemoMode ? "ðŸŸ¢ CONTA REAL" : "ðŸŸ¡ DEMO"}
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              <input
-                type="text"
-                placeholder="E-mail Capital.com"
-                value={capitalEmail}
-                onChange={(e) => setCapitalEmail(e.target.value)}
-                className="w-full bg-[#090e1f] border border-slate-800 text-slate-200 font-mono text-xs rounded-lg px-2.5 py-1.5 outline-none focus:border-cyan-500"
-              />
-              <input
-                type="password"
-                placeholder="Senha Capital.com"
-                value={capitalPassword}
-                onChange={(e) => setCapitalPassword(e.target.value)}
-                className="w-full bg-[#090e1f] border border-slate-800 text-slate-200 font-mono text-xs rounded-lg px-2.5 py-1.5 outline-none focus:border-cyan-500"
-              />
-            </div>
-          </div>
-
-          {/* HistÃ³rico de Ordens Reais da SessÃ£o */}
-          <div className="bg-[#050814] border border-slate-800/80 rounded-xl p-4 flex-1 flex flex-col shadow-xl">
-            <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5 mb-2">
-              <Activity className="w-3.5 h-3.5 text-emerald-400" />
-              Ordens ConcluÃ­das ({executedTrades.length})
-            </span>
-
-            <div className="space-y-1.5 overflow-y-auto max-h-[160px] font-mono text-[10px] pr-1">
-              {executedTrades.length === 0 ? (
-                <div className="text-slate-500 italic p-3 text-center">
-                  Clique em 'INICIAR OPERAÃ‡Ã•ES' para abrir posiÃ§Ãµes.
-                </div>
-              ) : (
-                executedTrades.map((t) => (
-                  <div key={t.id} className="p-2 rounded bg-[#090e1f] border border-slate-800 flex justify-between items-center">
-                    <div>
-                      <span className={`font-bold mr-1.5 ${t.action === "BUY" ? "text-emerald-400" : "text-rose-400"}`}>
-                        {t.action}
-                      </span>
-                      <span className="text-slate-400">{t.time}</span>
+              <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
+                Troca de ativo bloqueada enquanto há posição ou novas entradas
+                estão ativas.
+              </p>
+            </section>
+            <section className={`${panel} p-4`}>
+              <h2 className="mb-3 text-xs font-semibold tracking-wider text-slate-300">
+                LIVRO COINBASE · 6 NÍVEIS
+              </h2>
+              <p className="mb-3 flex items-center gap-2 text-xs text-slate-400">
+                <Radio
+                  size={14}
+                  className={feedError ? "text-rose-400" : "text-cyan-300"}
+                />
+                {feedError
+                  ? "Indisponível / antigo"
+                  : `Snapshot recebido há ${age}s`}
+              </p>
+              <div className="space-y-1 font-mono text-xs">
+                {(snapshot?.orderBook.asks || [])
+                  .slice(0, 3)
+                  .reverse()
+                  .map((a, n) => (
+                    <div
+                      key={`a${n}`}
+                      className="flex justify-between rounded bg-rose-950/20 p-1.5 text-rose-300"
+                    >
+                      <span>{price(a.price)}</span>
+                      <span>{a.size.toFixed(5)}</span>
                     </div>
-                    <span className="font-bold text-emerald-400">{t.profitBRL}</span>
+                  ))}
+                <div className="py-2 text-center text-slate-400">
+                  Spread: {snapshot ? price(snapshot.ask - snapshot.bid) : "—"}
+                </div>
+                {(snapshot?.orderBook.bids || []).slice(0, 3).map((b, n) => (
+                  <div
+                    key={`b${n}`}
+                    className="flex justify-between rounded bg-emerald-950/20 p-1.5 text-emerald-300"
+                  >
+                    <span>{price(b.price)}</span>
+                    <span>{b.size.toFixed(5)}</span>
                   </div>
-                ))
+                ))}
+              </div>
+              <p className="mt-4 text-xs text-slate-400">
+                Liquidez compradora:{" "}
+                <strong className="text-cyan-300">
+                  {snapshot
+                    ? `${snapshot.orderBook.buyerDominance.toFixed(1)}%`
+                    : "—"}
+                </strong>
+              </p>
+              <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+                Desbalanceamento não identifica instituições e não é
+                probabilidade de acerto.
+              </p>
+            </section>
+          </aside>
+          <div className="min-w-0 space-y-5">
+            <section className={`${panel} overflow-hidden`}>
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-4 py-3">
+                <h2 className="text-sm font-semibold">
+                  {symbol} <span className="text-slate-500">/ Coinbase</span>
+                </h2>
+                <span className="text-xs text-slate-400">
+                  Gráfico indicativo · {timeframe===3600?'1 hora':'1 minuto'}
+                </span>
+              </div>
+              <div className="h-[420px]">
+                <TradingViewWidget symbol={symbol} timeframeSeconds={timeframe}/>
+              </div>
+            </section>
+            <StrategyPanel decision={decision} mode={strategyMode} timeframe={timeframe} disabled={!!session.position||running||!ownsWallet} onMode={v=>{setStrategyMode(v);modeRef.current=v;setDecision(snapshot?.candles?evaluateStrategies(snapshot.candles,v):null);}} onTimeframe={v=>{setTimeframe(v);setDecision(null);}}/>
+            <section className={`${panel} p-4`}>
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-sm font-semibold">Registro de decisões</h2>
+                <button
+                  disabled={
+                    !ready || !ownsWallet || session.locked || (!running && !!feedError)
+                  }
+                  onClick={toggle}
+                  className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${running ? "bg-slate-700 text-white" : "bg-cyan-300 text-slate-950"}`}
+                >
+                  {running ? <Pause size={15} /> : <Play size={15} />}
+                  {running
+                    ? "Pausar entradas"
+                    : session.locked
+                      ? "Sessão bloqueada"
+                      : "Iniciar robô em paper"}
+                </button>
+              </div>
+              <p
+                role="status"
+                className="mb-4 rounded-lg bg-[#070d17] p-3 text-sm leading-relaxed text-cyan-100"
+              >
+                {status}
+              </p>
+              <div className="max-h-60 space-y-2 overflow-auto font-mono text-[11px]">
+                {logs.length === 0 ? (
+                  <p className="text-slate-500">
+                    O feed é consultado sem executar operações reais.
+                  </p>
+                ) : (
+                  [...logs]
+                    .reverse()
+                    .slice(0, 40)
+                    .map((log, n) => (
+                      <div
+                        key={`${log.at}-${n}`}
+                        className="border-l border-slate-700 pl-3 leading-relaxed"
+                      >
+                        <span className="text-slate-500">
+                          {new Date(log.at).toLocaleTimeString("pt-BR")} ·{" "}
+                          {log.action}{" "}
+                        </span>
+                        <span
+                          className={
+                            log.action === "FEED_ERROR"
+                              ? "text-rose-300"
+                              : "text-slate-300"
+                          }
+                        >
+                          {log.message}
+                        </span>
+                      </div>
+                    ))
+                )}
+              </div>
+            </section>
+            <section className={`${panel} p-4`}>
+              <h2 className="mb-4 text-sm font-semibold">
+                Operações encerradas{" "}
+                <span className="text-slate-500">
+                  ({session.trades.length})
+                </span>
+              </h2>
+              {!session.trades.length ? (
+                <p className="text-sm text-slate-500">
+                  Nenhum resultado fabricado. Lucro ou perda só é registrado
+                  após uma saída simulada.
+                </p>
+              ) : (
+                <div className="max-h-72 space-y-2 overflow-auto">
+                  {[...session.trades].reverse().map((t) => (
+                    <div
+                      key={t.id}
+                      className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[#080e19] p-3 text-xs"
+                    >
+                      <div>
+                        <p className="font-semibold">
+                          {t.symbol} · {t.strategyId||'legado'} · compra spot
+                        </p>
+                        <p className="mt-1 text-slate-500">
+                          {t.reason} ·{" "}
+                          {new Date(t.closedAt).toLocaleString("pt-BR")}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p
+                          className={`font-mono ${t.pnlBRL >= 0 ? "text-emerald-300" : "text-rose-300"}`}
+                        >
+                          {money(t.pnlBRL)}
+                        </p>
+                        <p className="mt-1 text-slate-500">
+                          Taxas {money(t.feesBRL)}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
-            </div>
+            </section>
           </div>
+          <aside className="space-y-5">
+            <section className={`${panel} p-4`}>
+              <h2 className="mb-4 text-sm font-semibold">
+                Parâmetros da carteira virtual
+              </h2>
+              <div className="space-y-3">
+                {[
+                  {
+                    key: "initialBRL",
+                    label: "Capital virtual inicial (R$)",
+                    min: 0.01,
+                  },
+                  {
+                    key: "usdBRL",
+                    label: "USD/BRL manual, fixo na sessão",
+                    min: 0.01,
+                  },
+                  {
+                    key: "feeBps",
+                    label: "Taxa por lado (bps; 60 = 0,60%)",
+                    min: 0,
+                  },
+                  {
+                    key: "slippageBps",
+                    label: "Slippage por lado (bps)",
+                    min: 0,
+                  },
+                ].map(({ key, label, min }) => (
+                  <label key={key} className="block text-xs text-slate-400">
+                    {label}
+                    <input
+                      aria-label={label}
+                      className={`${input} mt-1.5`}
+                      type="number"
+                      step="0.01"
+                      min={min}
+                      disabled={hasHistory || running || !ownsWallet}
+                      value={config[key as keyof Config]}
+                      onChange={(e) =>
+                        setConfig((c) => ({
+                          ...c,
+                          [key]: Number(e.target.value),
+                        }))
+                      }
+                    />
+                  </label>
+                ))}
+              </div>
+              <button
+                onClick={apply}
+                disabled={hasHistory || running || !ownsWallet}
+                className="mt-4 w-full rounded-lg border border-cyan-800 py-2 text-xs font-semibold text-cyan-200 disabled:opacity-40"
+              >
+                Aplicar parâmetros
+              </button>
+              <div className="mt-4 space-y-2 border-t border-slate-800 pt-4 text-xs text-slate-400">
+                <p>
+                  Risco planejado: até{" "}
+                  <strong className="text-white">1% / entrada</strong>
+                </p>
+                <p>
+                  Exposição: até{" "}
+                  <strong className="text-white">25% sem alavancagem</strong>
+                </p>
+                <p>
+                  Bloqueio de perda:{" "}
+                  <strong className="text-white">3% da sessão</strong>
+                </p>
+                <p>
+                  Meta de lucro:{" "}
+                  <strong className="text-white">
+                    sem promessa ou obrigação
+                  </strong>
+                </p>
+                <p>Uma entrada por candle · posição: até48candles; legado:15min</p>
+              </div>
+              <p className="mt-4 text-[11px] leading-relaxed text-amber-200/70">
+                Taxas e câmbio são hipóteses manuais, não tarifas verificadas da
+                sua conta. Gaps e intervalos de consulta podem superar o risco
+                planejado.
+              </p>
+            </section>
+            <section className={`${panel} p-4`}>
+              <h2 className="mb-3 text-sm font-semibold">Posição virtual</h2>
+              {session.position ? (
+                <>
+                  <p className="text-xs text-slate-400">
+                    {session.position.quantity.toFixed(8)}{" "}
+                    {session.position.symbol.split("-")[0]} · compra
+                  </p>
+                  <dl className="mt-3 space-y-2 font-mono text-xs">
+                    <div className="flex justify-between">
+                      <dt>Entrada</dt>
+                      <dd>{price(session.position.entry)}</dd>
+                    </div>
+                    <div className="flex justify-between text-rose-300">
+                      <dt>Stop observado</dt>
+                      <dd>{price(session.position.stop)}</dd>
+                    </div>
+                    <div className="flex justify-between text-emerald-300">
+                      <dt>Alvo observado</dt>
+                      <dd>{price(session.position.target)}</dd>
+                    </div>
+                  </dl>
+                  <button
+                    disabled={!!feedError || !ownsWallet}
+                    onClick={() => {
+                      const result = paperStep(
+                        sessionRef.current,
+                        snapshot,
+                        Date.now(),
+                        false,
+                        true,
+                      );
+                      commit(result.state);
+                      if (result.state.locked) {
+                        runningRef.current = false;
+                        setRunning(false);
+                      }
+                      record(result.action, result.message, snapshot);
+                    }}
+                    className="mt-4 w-full rounded-lg border border-rose-800 py-2 text-xs text-rose-200 disabled:opacity-40"
+                  >
+                    Encerrar posição simulada
+                  </button>
+                </>
+              ) : (
+                <p className="text-sm text-slate-500">
+                  Sem exposição virtual aberta.
+                </p>
+              )}
+              <p className="mt-4 text-[11px] leading-relaxed text-slate-500">
+                Monitoramento somente com a página aberta. Fechar a aba não
+                executa stops. Pausar bloqueia entradas, não o monitoramento da
+                posição.
+              </p>
+            </section>
+            <section className={`${panel} p-4`}>
+              <h2 className="mb-3 text-sm font-semibold">
+                Evidência, não promessa
+              </h2>
+              <p className="text-xs leading-relaxed text-slate-400">
+                Resultado total:{" "}
+                <span
+                  className={
+                    total !== null && total < 0 ? "text-rose-300" : "text-white"
+                  }
+                >
+                  {money(total)}
+                </span>
+                . O laboratório testa fora da amostra; vantagem ainda não comprovada.
+                A ausência de operação também é um resultado válido.
+              </p>
+              <p className="mt-3 text-xs text-slate-500">
+                RSI simples 14: {snapshot?.indicators.rsi.toFixed(1) ?? "—"}
+                <br />
+                VWAP móvel30candles: {price(snapshot?.indicators.vwap)}
+                <br />
+                ATR simples 14: {price(snapshot?.indicators.atr)}
+              </p>
+              <button
+                disabled={!!session.position || running || !ownsWallet}
+                onClick={reset}
+                className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-slate-700 py-2 text-xs text-slate-400 disabled:opacity-30"
+              >
+                <RotateCcw size={13} />
+                Nova sessão virtual
+              </button>
+            </section>
+          </aside>
         </div>
+        <footer className="mt-8 border-t border-slate-800 pt-4 text-[11px] leading-relaxed text-slate-500">
+          Fonte: Coinbase Exchange REST; gráfico TradingView Coinbase. Polling a
+          cada 5s após resposta, não alta frequência. Resultados e parâmetros
+          ficam neste navegador e podem ser alterados; exportação não é
+          auditoria independente. Credenciais de corretora nunca são armazenadas nesta página. Para execução fora da aba, o projeto inclui worker paper próprio; ele precisa de um ambiente que permaneça ligado.
+        </footer>
       </div>
     </main>
   );

@@ -1,0 +1,10 @@
+node_modules/
+.next/
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
+
+.astra-paper/
+.astra-demo/
+.astra-research/

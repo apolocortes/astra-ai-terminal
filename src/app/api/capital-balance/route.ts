@@ -1,28 +1,15 @@
 import { NextResponse } from "next/server";
-import { CapitalComClient } from "@/lib/capital-engine";
 
-const CAPITAL_API_KEY = "sM7ZGP4ElOFbXMs7";
-
-export async function POST(req: Request) {
-  try {
-    const { identifier, password, isDemo = true } = await req.json();
-
-    const client = new CapitalComClient({
-      apiKey: CAPITAL_API_KEY,
-      identifier: identifier || "trader@capital.com",
-      password: password || "",
-      isDemo,
-    });
-
-    const accountData = await client.getAccountBalance();
-
-    return NextResponse.json({
-      success: true,
-      apiKeyUsed: CAPITAL_API_KEY,
-      isDemo,
-      accountData,
-    });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  }
+// A versão anterior podia fabricar sucesso e enviar ordens sem controle de acesso.
+// Esta rota não usa credenciais nem faz chamadas à corretora.
+export async function POST() {
+  return NextResponse.json(
+    {
+      success: false,
+      mode: "PAPER_ONLY",
+      error:
+        "Integração legada desativada. Use a simulação identificada na interface. Execução em corretora exige autenticação, preços próprios, limites e reconciliação de ordens.",
+    },
+    { status: 410, headers: { "Cache-Control": "no-store" } },
+  );
 }

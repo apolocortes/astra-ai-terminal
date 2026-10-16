@@ -1,33 +1,15 @@
 import { NextResponse } from "next/server";
-import { CapitalComClient } from "@/lib/capital-engine";
 
-const DEFAULT_API_KEY = "sM7ZGP4ElOFbXMs7";
-
-export async function POST(req: Request) {
-  try {
-    const { action, epic = "BTCUSD", size = 0.01, identifier, password, isDemo = true } = await req.json();
-
-    const client = new CapitalComClient({
-      apiKey: DEFAULT_API_KEY,
-      identifier: identifier || "trader@capital.com",
-      password: password || "",
-      isDemo,
-    });
-
-    const result = await client.placeMarketOrder(
-      epic,
-      action?.includes("COMPRA") ? "BUY" : "SELL",
-      size
-    );
-
-    return NextResponse.json({
-      success: true,
-      broker: "Capital.com Global CFD Broker",
-      apiKeyUsed: DEFAULT_API_KEY,
-      order: result,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-  }
+// A versão anterior podia fabricar sucesso e enviar ordens sem controle de acesso.
+// Esta rota não usa credenciais nem faz chamadas à corretora.
+export async function POST() {
+  return NextResponse.json(
+    {
+      success: false,
+      mode: "PAPER_ONLY",
+      error:
+        "Integração legada desativada. Use a simulação identificada na interface. Execução em corretora exige autenticação, preços próprios, limites e reconciliação de ordens.",
+    },
+    { status: 410, headers: { "Cache-Control": "no-store" } },
+  );
 }
