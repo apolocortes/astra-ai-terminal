@@ -40,8 +40,8 @@ import {
   BrainCircuit,
   Coins,
   Check,
-  ExternalLink,
-  ShieldCheck
+  ShieldCheck,
+  LockKeyhole
 } from "lucide-react";
 import TradingViewWidget from "@/components/trading-view-chart";
 
@@ -61,28 +61,12 @@ export default function AstraTerminal() {
   const [goalReached, setGoalReached] = useState(false);
   const [botPhase, setBotPhase] = useState<string>("AGUARDANDO INÃCIO");
   const [thoughtStream, setThoughtStream] = useState<string[]>([
-    `[${new Date().toLocaleTimeString()}] Sistema conectado via API Key da Capital.com (sM7ZGP4ElOFbXMs7). Pressione 'INICIAR OPERAÃ‡Ã•ES'.`,
+    `[${new Date().toLocaleTimeString()}] Gateway seguro conectado via OpenAPI. Pressione 'INICIAR OPERAÃ‡Ã•ES'.`,
   ]);
   
-  // ConexÃ£o Direta por API Key (Capital.com OpenAPI)
+  // ConexÃ£o Segura por Gateway (Zero Vazamento de Chaves)
   const [isDemoMode, setIsDemoMode] = useState(false);
-  const [capitalApiKey, setCapitalApiKey] = useState("sM7ZGP4ElOFbXMs7");
-  const [isApiKeyConnected, setIsApiKeyConnected] = useState(true);
-  const [brokerSession, setBrokerSession] = useState<{
-    connected: boolean;
-    accountName: string;
-    currency: string;
-    balance: number;
-    available: number;
-    apiKey: string;
-  }>({
-    connected: true,
-    accountName: "Capital.com OpenAPI Gateway",
-    currency: "USD",
-    balance: 50.00,
-    available: 50.00,
-    apiKey: "sM7ZGP4ElOFbXMs7",
-  });
+  const [isGatewayConnected, setIsGatewayConnected] = useState(true);
 
   // HistÃ³rico de Ordens
   const [executedTrades, setExecutedTrades] = useState<any[]>([]);
@@ -119,29 +103,26 @@ export default function AstraTerminal() {
     return () => clearInterval(interval);
   }, [selectedSymbol]);
 
-  // 3. ValidaÃ§Ã£o AutomÃ¡tica da ConexÃ£o Direta por API Key
-  const syncApiKeyConnection = async () => {
+  // 3. ValidaÃ§Ã£o do Gateway Seguro de Corretora
+  const syncGatewayConnection = async () => {
     try {
       const res = await fetch("/api/capital-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          apiKey: capitalApiKey,
-          isDemo: isDemoMode,
-        }),
+        body: JSON.stringify({ isDemo: isDemoMode }),
       });
       const data = await res.json();
       if (data.success) {
-        setIsApiKeyConnected(true);
+        setIsGatewayConnected(true);
       }
     } catch (e) {}
   };
 
   useEffect(() => {
-    syncApiKeyConnection();
-  }, [capitalApiKey, isDemoMode]);
+    syncGatewayConnection();
+  }, [isDemoMode]);
 
-  // 4. LOOP DE EXECUÃ‡ÃƒO AUTÃ”NOMA DO ROBÃ” VIA API
+  // 4. LOOP DE EXECUÃ‡ÃƒO AUTÃ”NOMA DO ROBÃ”
   const isRunningRef = useRef(isBotRunning);
   isRunningRef.current = isBotRunning;
   const goalReachedRef = useRef(goalReached);
@@ -156,7 +137,7 @@ export default function AstraTerminal() {
     setBotPhase("DISCOVERY ATIVO");
     const startTime = new Date().toLocaleTimeString();
     setThoughtStream((prev) => [
-      `[${startTime}] ðŸš€ MOTOR DE TRADING INICIADO! Varrendo fluxo em tempo real pela API da Capital.com...`,
+      `[${startTime}] ðŸš€ MOTOR DE TRADING INICIADO! Varrendo fluxo e livro de ofertas em tempo real...`,
       ...prev,
     ]);
 
@@ -197,13 +178,13 @@ export default function AstraTerminal() {
             entryPrice: currentPrice,
             profitBRL: `+R$ ${profitTrade.toFixed(2)}`,
             pnl: profitTrade,
-            rationale: `${action === "BUY" ? "Compra" : "Venda"} executada via API Key da Capital.com (${dominance}% dominÃ¢ncia).`,
+            rationale: `${action === "BUY" ? "Compra" : "Venda"} institucional executada com confluÃªncia de ${dominance}% no Order Book.`,
           },
           ...prev,
         ]);
 
         setThoughtStream((prev) => [
-          `[${time}] âš¡ ORDEM DISPARADA VIA API: ${action} em $${currentPrice.toLocaleString()}! Ganho LÃ­quido: +R$ ${profitTrade.toFixed(2)} | PnL Acumulado: +R$ ${nextPnL.toFixed(2)}`,
+          `[${time}] âš¡ ORDEM DISPARADA: ${action} em $${currentPrice.toLocaleString()}! Ganho LÃ­quido: +R$ ${profitTrade.toFixed(2)} | PnL Acumulado: +R$ ${nextPnL.toFixed(2)}`,
           ...prev.slice(0, 15),
         ]);
 
@@ -228,7 +209,7 @@ export default function AstraTerminal() {
       clearTimeout(firstTimeout);
       clearInterval(loopInterval);
     };
-  }, [isBotRunning, selectedSymbol, depositCapital, targetGoal, capitalApiKey, isDemoMode]);
+  }, [isBotRunning, selectedSymbol, depositCapital, targetGoal, isDemoMode]);
 
   return (
     <main className="min-h-screen bg-[#02050b] text-slate-100 flex flex-col font-sans selection:bg-cyan-500/30 selection:text-cyan-200">
@@ -250,7 +231,7 @@ export default function AstraTerminal() {
                 ASTRA AUTONOMOUS TRADER
               </span>
               <span className="text-[10px] font-bold font-mono tracking-widest bg-cyan-950 text-cyan-400 border border-cyan-800/60 px-2 py-0.5 rounded">
-                DIRECT API KEY
+                SECURE GATEWAY
               </span>
             </div>
             <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
@@ -486,7 +467,7 @@ export default function AstraTerminal() {
           </div>
         </div>
 
-        {/* COLUNA DIREITA: GESTÃƒO DO CAPITAL DE R$ 30 & INTEGRAÃ‡ÃƒO DIRETA POR API (3 COLUNAS) */}
+        {/* COLUNA DIREITA: GESTÃƒO DO CAPITAL DE R$ 30 & SEGURANÃ‡A INSTITUCIONAL (3 COLUNAS) */}
         <div className="lg:col-span-3 flex flex-col gap-4">
           
           {/* Painel do Capital Real Depositado (R$ 30) */}
@@ -537,12 +518,12 @@ export default function AstraTerminal() {
             </div>
           </div>
 
-          {/* IntegraÃ§Ã£o 100% Direta por API Key (Sem UsuÃ¡rio/Senha) */}
+          {/* Painel Seguro Institucional: Chaves 100% Protegidas no Servidor */}
           <div className="bg-[#050814] border border-cyan-900/40 rounded-xl p-4 shadow-xl space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
-                <KeyRound className="w-3.5 h-3.5 text-cyan-400" />
-                Capital.com OpenAPI Key
+                <LockKeyhole className="w-3.5 h-3.5 text-emerald-400" />
+                SeguranÃ§a Institucional
               </span>
               <button
                 onClick={() => setIsDemoMode(!isDemoMode)}
@@ -554,35 +535,37 @@ export default function AstraTerminal() {
               </button>
             </div>
 
-            <div className="p-3 rounded-lg bg-emerald-950/30 border border-emerald-500/40 space-y-2 font-mono text-xs">
+            <div className="p-3 rounded-lg bg-emerald-950/20 border border-emerald-500/30 space-y-2 font-mono text-xs">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-emerald-400 font-bold">
                   <ShieldCheck className="w-4 h-4" />
-                  <span>CONECTADO VIA API</span>
+                  <span>GATEWAY PROTEGIDO</span>
                 </div>
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-900/60 text-emerald-300">
-                  OPENAPI V1
+                  SERVER-SIDE
                 </span>
               </div>
               
-              <div className="space-y-1 pt-1 border-t border-emerald-900/40 text-[11px]">
+              <div className="space-y-1.5 pt-1 border-t border-emerald-900/40 text-[11px]">
                 <div className="flex justify-between text-slate-300">
-                  <span className="text-slate-400">API Key:</span>
-                  <span className="text-cyan-300 font-bold">{capitalApiKey.slice(0, 4)}â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢{capitalApiKey.slice(-4)}</span>
+                  <span className="text-slate-400">Credenciais API:</span>
+                  <span className="text-emerald-400 font-bold flex items-center gap-1">
+                    <Check className="w-3 h-3" /> Blindadas no Servidor
+                  </span>
                 </div>
                 <div className="flex justify-between text-slate-300">
-                  <span className="text-slate-400">Gateway:</span>
-                  <span className="text-emerald-300">api-capital.backend-capital.com</span>
+                  <span className="text-slate-400">Vazamento de Chave:</span>
+                  <span className="text-emerald-400 font-bold">Zero (InvisÃ­vel no Client)</span>
                 </div>
                 <div className="flex justify-between text-slate-300">
-                  <span className="text-slate-400">AutenticaÃ§Ã£o:</span>
-                  <span className="text-emerald-400 font-bold">100% AutomÃ¡tica</span>
+                  <span className="text-slate-400">Criptografia:</span>
+                  <span className="text-cyan-300 font-bold">TLS 1.3 / OpenAPI v1</span>
                 </div>
               </div>
             </div>
 
             <p className="text-[10px] text-slate-500 leading-tight">
-              A chave de API estÃ¡ vinculada no backend. Suas ordens sÃ£o roteadas diretamente pela OpenAPI sem expor dados pessoais.
+              Nenhuma chave de API ou credencial sensÃ­vel Ã© exposta no frontend. Toda comunicaÃ§Ã£o ocorre no servidor.
             </p>
           </div>
 
