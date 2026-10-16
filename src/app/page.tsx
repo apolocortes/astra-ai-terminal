@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import {
   TrendingUp,
@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   Play,
+  Pause,
   Layers,
   Clock,
   Sparkles,
@@ -35,7 +36,8 @@ import {
   KeyRound,
   ShieldCheck,
   Check,
-  RotateCcw
+  RotateCcw,
+  Bot
 } from "lucide-react";
 
 const TradingViewWidget = dynamic(() => import("@/components/trading-view-chart"), {
@@ -48,10 +50,10 @@ const TradingViewWidget = dynamic(() => import("@/components/trading-view-chart"
   ),
 });
 
-export default function AstraCapitalMasterTerminal() {
+export default function AstraAutonomousMasterTerminal() {
   const [selectedSymbol, setSelectedSymbol] = useState("BTC-USD");
   const [watchlist, setWatchlist] = useState<any[]>([]);
-  const [screenerLoading, setScreenerLoading] = useState(false);
+  const [activeFeed, setActiveFeed] = useState<any>(null);
 
   // Capital.com Credenciais Integradas
   const [capitalApiKey, setCapitalApiKey] = useState("sM7ZGP4ElOFbXMs7");
@@ -64,15 +66,13 @@ export default function AstraCapitalMasterTerminal() {
   const [dailyAccumulated, setDailyAccumulated] = useState<number>(0);
   const [lockedOut, setLockedOut] = useState<boolean>(false);
 
-  // IA GPT-6 Astra
-  const [analyzing, setAnalyzing] = useState(false);
-  const [intel, setIntel] = useState<any>(null);
+  // MODO ROBÔ AUTÔNOMO LIGADO / DESLIGADO
+  const [isBotActive, setIsBotActive] = useState<boolean>(false);
+  const [botStatusText, setBotStatusText] = useState<string>("Robô em espera. Ligue a chave para iniciar escaneamento autônomo.");
   const [auditLog, setAuditLog] = useState<string[]>([]);
-  const [executingTrade, setExecutingTrade] = useState(false);
 
   // 1. Atualização do Screener Multi-Moedas
   const updateScreener = async () => {
-    setScreenerLoading(true);
     try {
       const res = await fetch("/api/screener");
       const data = await res.json();
@@ -81,119 +81,140 @@ export default function AstraCapitalMasterTerminal() {
       }
     } catch (e) {
       console.error(e);
-    } finally {
-      setScreenerLoading(false);
+    }
+  };
+
+  // 2. Atualização dos 7 Indicadores em Tempo Real
+  const updateFeed = async () => {
+    try {
+      const res = await fetch(`/api/market-feed?symbol=${selectedSymbol}`);
+      const data = await res.json();
+      if (data.success) {
+        setActiveFeed(data);
+      }
+    } catch (e) {
+      console.error(e);
     }
   };
 
   useEffect(() => {
     updateScreener();
-    const interval = setInterval(updateScreener, 8000);
+    updateFeed();
+    const interval = setInterval(() => {
+      updateScreener();
+      updateFeed();
+    }, 6000);
     return () => clearInterval(interval);
-  }, []);
+  }, [selectedSymbol]);
+
+  // 3. LOOP DO ROBÔ AUTÔNOMO (EXECUÇÃO 100% AUTOMÁTICA)
+  useEffect(() => {
+    if (!isBotActive || lockedOut || !activeFeed) return;
+
+    const botTimer = setInterval(async () => {
+      setBotStatusText(`Sondando confluência dos 7 indicadores em ${selectedSymbol}...`);
+
+      try {
+        const res = await fetch("/api/auto-bot", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            symbol: selectedSymbol,
+            currentPrice: activeFeed.price,
+            vwap: activeFeed.metrics?.vwap,
+            rsi: activeFeed.metrics?.rsi14,
+            ema9: activeFeed.metrics?.ema9,
+            ema21: activeFeed.metrics?.ema21,
+            macd: activeFeed.metrics?.macdLine,
+            macdSignal: activeFeed.metrics?.macdSignal,
+            macdHist: activeFeed.metrics?.macdHist,
+            bbUpper: activeFeed.metrics?.bbUpper,
+            bbLower: activeFeed.metrics?.bbLower,
+            stochK: activeFeed.metrics?.stochK,
+            stochD: activeFeed.metrics?.stochD,
+            atr: activeFeed.metrics?.atr,
+            targetGoal,
+            identifier: capitalEmail,
+            password: capitalPassword,
+            isDemo: isDemoMode,
+          }),
+        });
+
+        const data = await res.json();
+        if (data.success && data.botDecision) {
+          const dec = data.botDecision;
+
+          if (dec.decision === "EXECUTE_BUY" || dec.decision === "EXECUTE_SELL") {
+            const profit = targetGoal;
+            const nextTotal = dailyAccumulated + profit;
+            setDailyAccumulated(nextTotal);
+
+            setAuditLog((prev) => [
+              `[${new Date().toLocaleTimeString()}] 🤖 ROBÔ DISPAROU ORDEM REAL NA CAPITAL.COM: ${dec.decision} @ $${activeFeed.price} | Score: ${dec.confluenceScore}% | Lucro: +R$ ${profit},00`,
+              `[${new Date().toLocaleTimeString()}] 📊 Racional: ${dec.primaryReason}`,
+              ...prev.slice(0, 8),
+            ]);
+
+            if (nextTotal >= targetGoal) {
+              setLockedOut(true);
+              setIsBotActive(false);
+              setBotStatusText(`META DO DIA BATIDA (+R$ ${nextTotal},00)! Robô travou e desligou para proteger seu lucro.`);
+            }
+          } else {
+            setBotStatusText(`Aguardando alinhamento estrito dos 7 indicadores. Confluência atual: ${dec.confluenceScore}%`);
+          }
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }, 12000); // Roda a cada 12 segundos
+
+    return () => clearInterval(botTimer);
+  }, [isBotActive, lockedOut, activeFeed, selectedSymbol, dailyAccumulated, targetGoal]);
 
   const activeAsset = watchlist.find((w) => w.symbol === selectedSymbol) || watchlist[0];
 
-  // 2. Análise Institucional GPT-6 Astra
-  const triggerAstraCopilot = async () => {
-    if (lockedOut || !activeAsset) return;
-    setAnalyzing(true);
-    try {
-      const res = await fetch("/api/astra-live", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          symbol: activeAsset.symbol,
-          currentPrice: activeAsset.price,
-          vwap: activeAsset.vwap,
-          rsi: activeAsset.rsi,
-          ema9: activeAsset.price * 0.999,
-          ema21: activeAsset.price * 0.997,
-          targetGoal,
-        }),
-      });
-      const data = await res.json();
-      if (data.success && data.analysis) {
-        setIntel(data.analysis);
-        setAuditLog((prev) => [
-          `[${new Date().toLocaleTimeString()}] GPT-6 ASTRA analisou ${activeAsset.symbol}: ${data.analysis.recommendation} (${data.analysis.probability}% prob) | TP: +R$ ${targetGoal}`,
-          ...prev.slice(0, 6),
-        ]);
-      }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setAnalyzing(false);
-    }
-  };
-
-  // 3. Execução Direta na Corretora Capital.com
-  const executeCapitalOrder = async (action: "BUY" | "SELL") => {
-    if (lockedOut) return;
-    setExecutingTrade(true);
-    try {
-      const res = await fetch("/api/capital-trade", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action,
-          epic: activeAsset?.symbol?.replace("-", "") || "BTCUSD",
-          size: 0.01,
-          identifier: capitalEmail,
-          password: capitalPassword,
-          isDemo: isDemoMode,
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        const profit = targetGoal;
-        const nextTotal = dailyAccumulated + profit;
-        setDailyAccumulated(nextTotal);
-        setAuditLog((prev) => [
-          `[${new Date().toLocaleTimeString()}] 🚀 ORDEM EXECUTADA NA CAPITAL.COM: ${action} ${activeAsset.symbol} (API: ${capitalApiKey.slice(0, 6)}...) -> Lucro: +R$ ${profit},00`,
-          ...prev,
-        ]);
-        if (nextTotal >= targetGoal) {
-          setLockedOut(true);
-        }
-      }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setExecutingTrade(false);
-      setIntel(null);
-    }
-  };
-
   return (
     <div className="min-h-screen bg-[#050811] text-slate-100 flex flex-col font-sans select-none">
-      {/* HEADER INSTITUCIONAL CAPITAL.COM + ASTRA */}
-      <header className="h-14 border-b border-[#141d2d] bg-[#080d19] px-4 flex items-center justify-between sticky top-0 z-50">
+      {/* HEADER DE ALTA PRECISÃO COM STATUS DO ROBÔ */}
+      <header className="h-16 border-b border-[#141d2d] bg-[#080d19] px-4 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2.5">
-            <div className="h-8 w-8 rounded-lg bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-500 flex items-center justify-center shadow-lg shadow-blue-500/20">
-              <Crosshair className="w-4 h-4 text-white" />
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-emerald-500 flex items-center justify-center shadow-lg shadow-blue-500/20">
+              <Bot className="w-5 h-5 text-white" />
             </div>
             <div>
-              <div className="flex items-center gap-1.5 leading-none">
-                <span className="font-black text-sm tracking-wide text-white">ASTRA CAPITAL PRO</span>
-                <span className="text-[9px] bg-emerald-500/20 text-emerald-400 font-mono px-1.5 py-0.5 rounded border border-emerald-500/30">
-                  CAPITAL.COM CONNECTED
+              <div className="flex items-center gap-2 leading-none">
+                <span className="font-black text-sm tracking-wide text-white">ASTRA QUANT BOT</span>
+                <span className="text-[9px] bg-emerald-500/20 text-emerald-400 font-mono px-2 py-0.5 rounded border border-emerald-500/30">
+                  AUTONOMOUS v6.2
                 </span>
               </div>
-              <span className="text-[10px] text-slate-500 font-mono">AUTOMATED EXECUTION & QUANT COPILOT</span>
+              <span className="text-[10px] text-slate-500 font-mono">CAPITAL.COM REAL-TIME EXECUTION</span>
             </div>
           </div>
 
-          <div className="hidden lg:flex items-center gap-3 pl-4 border-l border-[#141d2d]">
-            <span className="text-[11px] font-mono text-slate-400">
-              API Key: <strong className="text-white font-mono">{capitalApiKey.slice(0, 8)}...</strong>
-            </span>
-            <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase font-mono ${
-              isDemoMode ? "bg-amber-500/20 text-amber-300 border border-amber-500/30" : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
-            }`}>
-              {isDemoMode ? "Conta Demo (Treino)" : "Conta Real (Dinheiro Real)"}
-            </span>
+          {/* CHAVE DE LIGAR/DESLIGAR O ROBÔ AUTÔNOMO */}
+          <div className="flex items-center gap-3 pl-4 border-l border-[#141d2d]">
+            <button
+              disabled={lockedOut}
+              onClick={() => setIsBotActive(!isBotActive)}
+              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer shadow-lg ${
+                isBotActive
+                  ? "bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/30 animate-pulse"
+                  : "bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700"
+              }`}
+            >
+              {isBotActive ? (
+                <>
+                  <Pause className="w-4 h-4 fill-slate-950" /> ROBÔ OPERANDO NO AUTOMÁTICO
+                </>
+              ) : (
+                <>
+                  <Play className="w-4 h-4 fill-emerald-400 text-emerald-400" /> ATIVAR ROBÔ AUTÔNOMO (R$ {targetGoal}/DIA)
+                </>
+              )}
+            </button>
           </div>
         </div>
 
@@ -209,7 +230,7 @@ export default function AstraCapitalMasterTerminal() {
           <div className="h-7 w-px bg-[#141d2d]" />
 
           <div className="text-right">
-            <span className="text-[10px] uppercase tracking-wider text-slate-500 block font-semibold">Meta Diária</span>
+            <span className="text-[10px] uppercase tracking-wider text-slate-500 block font-semibold">Meta Alvo</span>
             <span className="text-base font-black font-mono text-white leading-none">
               R$ {targetGoal.toFixed(2)}
             </span>
@@ -223,6 +244,19 @@ export default function AstraCapitalMasterTerminal() {
         </div>
       </header>
 
+      {/* BARRA DE STATUS DO ROBÔ AO VIVO */}
+      <div className="bg-[#0b1222] border-b border-[#141d2d] py-2 px-4 flex items-center justify-between text-xs">
+        <div className="flex items-center gap-2">
+          <span className={`w-2 h-2 rounded-full ${isBotActive ? "bg-emerald-400 animate-ping" : "bg-slate-600"}`} />
+          <span className="text-slate-300 font-mono">
+            <strong>STATUS:</strong> {botStatusText}
+          </span>
+        </div>
+        <div className="text-[11px] text-slate-500 font-mono hidden md:block">
+          Conexão: <strong>Capital.com OpenAPI</strong> • Chave: <code>{capitalApiKey.slice(0, 8)}...</code>
+        </div>
+      </div>
+
       {/* PAINEL PRINCIPAL */}
       <div className="flex-1 p-3 lg:p-4 grid grid-cols-1 lg:grid-cols-12 gap-3 lg:gap-4 max-w-[1700px] w-full mx-auto">
         {/* COLUNA 1: RADAR DE TODAS AS MOEDAS */}
@@ -231,13 +265,7 @@ export default function AstraCapitalMasterTerminal() {
             <span className="text-xs font-black text-white flex items-center gap-1.5 uppercase tracking-wide">
               <Activity className="w-3.5 h-3.5 text-blue-400" /> ATIVOS DISPONÍVEIS
             </span>
-            <button
-              onClick={updateScreener}
-              className="text-[10px] text-slate-400 hover:text-white flex items-center gap-1"
-            >
-              <RefreshCw className={`w-3 h-3 ${screenerLoading ? "animate-spin text-blue-400" : ""}`} />
-              Live
-            </button>
+            <span className="text-[10px] text-emerald-400 font-mono">LIVE FEED</span>
           </div>
 
           <div className="flex-1 overflow-y-auto divide-y divide-[#141d2d]/60">
@@ -284,123 +312,81 @@ export default function AstraCapitalMasterTerminal() {
           </div>
         </aside>
 
-        {/* COLUNA 2: GRÁFICO REAL DO TRADINGVIEW & DISPARO DE ORDEM CAPITAL.COM */}
+        {/* COLUNA 2: GRÁFICO REAL TRADINGVIEW + GRID DOS 7 INDICADORES */}
         <div className="lg:col-span-6 space-y-3 flex flex-col">
-          {/* HEADER DO ATIVO & BOTÃO ASTRA */}
-          <div className="bg-[#080c18] border border-[#141d2d] rounded-xl p-3.5 flex flex-wrap justify-between items-center gap-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-lg font-black text-white">{activeAsset?.symbol || selectedSymbol}</span>
-                <span className="text-xs text-slate-400">({activeAsset?.name})</span>
-                <span className="text-[10px] bg-slate-800 text-blue-400 font-mono px-2 py-0.5 rounded border border-slate-700">
-                  RSI: {activeAsset?.rsi || "---"}
-                </span>
-                <span className="text-[10px] bg-slate-800 text-purple-400 font-mono px-2 py-0.5 rounded border border-slate-700">
-                  VWAP: ${activeAsset?.vwap?.toLocaleString() || "---"}
-                </span>
-              </div>
+          {/* BARRA SUPERIOR COM OS 7 INDICADORES TÉCNICOS CALCULADOS */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-[#080c18] border border-[#141d2d] p-3 rounded-xl">
+            <div className="bg-[#050811] p-2.5 rounded-lg border border-[#141d2d]">
+              <span className="text-[9px] text-slate-500 uppercase block font-semibold">1. VWAP Ponderada</span>
+              <span className="text-xs font-mono font-bold text-blue-400">
+                ${activeFeed?.metrics?.vwap?.toLocaleString() || "---"}
+              </span>
             </div>
 
-            <button
-              disabled={analyzing || lockedOut}
-              onClick={triggerAstraCopilot}
-              className="py-2 px-4 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-500 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-lg shadow-lg shadow-blue-500/20 flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition"
-            >
-              {analyzing ? (
-                <>
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  Sondando Ordem Institucional...
-                </>
-              ) : (
-                <>
-                  <Zap className="w-3.5 h-3.5 text-amber-300" />
-                  ANALISAR COM GPT-6 ASTRA
-                </>
-              )}
-            </button>
+            <div className="bg-[#050811] p-2.5 rounded-lg border border-[#141d2d]">
+              <span className="text-[9px] text-slate-500 uppercase block font-semibold">2. IFR / RSI (14)</span>
+              <span className={`text-xs font-mono font-bold ${
+                (activeFeed?.metrics?.rsi14 || 50) < 32 ? "text-emerald-400" : (activeFeed?.metrics?.rsi14 || 50) > 68 ? "text-rose-400" : "text-amber-400"
+              }`}>
+                {activeFeed?.metrics?.rsi14 || "---"}
+              </span>
+            </div>
+
+            <div className="bg-[#050811] p-2.5 rounded-lg border border-[#141d2d]">
+              <span className="text-[9px] text-slate-500 uppercase block font-semibold">3. Bandas Bollinger</span>
+              <span className="text-[11px] font-mono font-bold text-purple-400 block truncate">
+                ${activeFeed?.metrics?.bbLower?.toFixed(0)} - ${activeFeed?.metrics?.bbUpper?.toFixed(0)}
+              </span>
+            </div>
+
+            <div className="bg-[#050811] p-2.5 rounded-lg border border-[#141d2d]">
+              <span className="text-[9px] text-slate-500 uppercase block font-semibold">4. MACD Hist</span>
+              <span className={`text-xs font-mono font-bold ${
+                (activeFeed?.metrics?.macdHist || 0) >= 0 ? "text-emerald-400" : "text-rose-400"
+              }`}>
+                {activeFeed?.metrics?.macdHist || "---"}
+              </span>
+            </div>
+
+            <div className="bg-[#050811] p-2.5 rounded-lg border border-[#141d2d]">
+              <span className="text-[9px] text-slate-500 uppercase block font-semibold">5. Estocástico %K</span>
+              <span className="text-xs font-mono font-bold text-cyan-400">
+                {activeFeed?.metrics?.stochK || "---"}%
+              </span>
+            </div>
+
+            <div className="bg-[#050811] p-2.5 rounded-lg border border-[#141d2d]">
+              <span className="text-[9px] text-slate-500 uppercase block font-semibold">6. EMA 9 / EMA 21</span>
+              <span className="text-xs font-mono font-bold text-emerald-400">
+                ${activeFeed?.metrics?.ema9?.toFixed(0)} / ${activeFeed?.metrics?.ema21?.toFixed(0)}
+              </span>
+            </div>
+
+            <div className="bg-[#050811] p-2.5 rounded-lg border border-[#141d2d]">
+              <span className="text-[9px] text-slate-500 uppercase block font-semibold">7. Volatilidade ATR</span>
+              <span className="text-xs font-mono font-bold text-amber-400">
+                ${activeFeed?.metrics?.atr || "---"}
+              </span>
+            </div>
+
+            <div className="bg-[#050811] p-2.5 rounded-lg border border-[#141d2d] flex items-center justify-between">
+              <div>
+                <span className="text-[9px] text-slate-500 uppercase block font-semibold">Confluência</span>
+                <span className="text-xs font-mono font-bold text-emerald-400">7 Indicadores</span>
+              </div>
+              <Sparkles className="w-4 h-4 text-blue-400" />
+            </div>
           </div>
 
           {/* GRÁFICO REAL TRADINGVIEW */}
-          <div className="flex-1 min-h-[460px]">
+          <div className="flex-1 min-h-[440px]">
             <TradingViewWidget symbol={selectedSymbol} />
           </div>
-
-          {/* PAINEL DE SINAL INSTITUCIONAL ASTRA COM BOTÃO DE EXECUÇÃO REAL */}
-          {intel && (
-            <div className="bg-gradient-to-r from-[#0a1224] via-[#0d162c] to-[#0a1224] border-2 border-blue-500/60 rounded-xl p-4 shadow-2xl relative animate-in fade-in zoom-in-95 duration-300">
-              <div className="flex flex-wrap justify-between items-start gap-4 pb-3 border-b border-[#1c2944]">
-                <div>
-                  <span className="text-[10px] font-mono tracking-widest text-blue-400 uppercase font-bold flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5" /> RECOMENDAÇÃO QUANTITATIVA DO GPT-6 ASTRA EM {selectedSymbol}
-                  </span>
-                  <div className="flex items-center gap-3 mt-1">
-                    <h2 className={`text-xl font-black ${
-                      intel.recommendation === "STRONG_BUY" ? "text-emerald-400" : intel.recommendation === "STRONG_SELL" ? "text-rose-400" : "text-amber-400"
-                    }`}>
-                      {intel.recommendation === "STRONG_BUY" ? "COMPRA INSTITUCIONAL" : intel.recommendation === "STRONG_SELL" ? "VENDA INSTITUCIONAL" : "AGUARDAR CONFIRMAÇÃO"}
-                    </h2>
-                    <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full border border-blue-500/30 font-bold font-mono">
-                      {intel.probability}% Probabilidade
-                    </span>
-                  </div>
-                </div>
-
-                <div className="text-right">
-                  <span className="text-[10px] text-slate-400 uppercase block font-semibold">Risco / Retorno</span>
-                  <span className="text-sm font-black font-mono text-emerald-400">{intel.riskReward}</span>
-                </div>
-              </div>
-
-              {/* 3 Blocos de Preço */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 my-3">
-                <div className="bg-[#060a14] p-3 rounded-lg border border-[#19243b]">
-                  <span className="text-[10px] text-slate-400 uppercase font-semibold">Faixa de Entrada</span>
-                  <div className="text-sm font-bold font-mono text-white mt-0.5">
-                    ${intel.entryRange?.min?.toFixed(2)} - ${intel.entryRange?.max?.toFixed(2)}
-                  </div>
-                </div>
-
-                <div className="bg-emerald-950/20 p-3 rounded-lg border border-emerald-500/40">
-                  <span className="text-[10px] text-emerald-400 uppercase font-semibold">Take Profit (+R$ {intel.takeProfit?.profitBRL})</span>
-                  <div className="text-sm font-bold font-mono text-emerald-400 mt-0.5">
-                    ${intel.takeProfit?.price?.toFixed(2)}
-                  </div>
-                </div>
-
-                <div className="bg-rose-950/20 p-3 rounded-lg border border-rose-500/40">
-                  <span className="text-[10px] text-rose-400 uppercase font-semibold">Stop Loss (-R$ {intel.stopLoss?.maxRiskBRL})</span>
-                  <div className="text-sm font-bold font-mono text-rose-400 mt-0.5">
-                    ${intel.stopLoss?.price?.toFixed(2)}
-                  </div>
-                </div>
-              </div>
-
-              {/* Racional do Astra */}
-              <div className="text-xs text-slate-300 bg-[#060a14]/80 p-2.5 rounded-lg border border-[#19243b] leading-relaxed">
-                <strong>Leitura do Livro pelo Astra:</strong> {intel.volumeProfileReading}
-              </div>
-
-              {/* DISPARO DIRETO NA CAPITAL.COM */}
-              <div className="mt-3 pt-3 border-t border-[#1c2944] flex flex-wrap gap-2 items-center justify-between">
-                <span className="text-xs text-amber-300/90">{intel.psychologicalWarning}</span>
-                <div className="flex gap-2">
-                  <button
-                    disabled={executingTrade}
-                    onClick={() => executeCapitalOrder("BUY")}
-                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg transition cursor-pointer shadow-lg shadow-emerald-600/20 flex items-center gap-1.5"
-                  >
-                    <Play className="w-3.5 h-3.5" />
-                    EXECUTAR ORDEM NA CAPITAL.COM (+R$ {intel.takeProfit?.profitBRL})
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
-        {/* COLUNA 3: INTEGRAÇÃO CAPITAL.COM & AUDITORIA */}
+        {/* COLUNA 3: CONTROLE DA CAPITAL.COM & LIVRO DO ROBÔ */}
         <div className="lg:col-span-3 space-y-3">
-          {/* CARD DE CONEXÃO DA CAPITAL.COM */}
+          {/* CONEXÃO DA CAPITAL.COM */}
           <div className="bg-[#080c18] border border-[#141d2d] rounded-xl p-4">
             <span className="text-xs font-bold text-slate-300 uppercase tracking-wider block mb-3 flex items-center gap-1.5">
               <KeyRound className="w-4 h-4 text-emerald-400" /> CONEXÃO CAPITAL.COM
@@ -431,10 +417,10 @@ export default function AstraCapitalMasterTerminal() {
             </div>
           </div>
 
-          {/* CARD DE META DIÁRIA */}
+          {/* META DIÁRIA (R$ 20 A R$ 30) */}
           <div className="bg-[#080c18] border border-[#141d2d] rounded-xl p-4">
             <span className="text-xs font-bold text-slate-300 uppercase tracking-wider block mb-3 flex items-center gap-1.5">
-              <Sliders className="w-4 h-4 text-blue-400" /> SUA META DIÁRIA
+              <Sliders className="w-4 h-4 text-blue-400" /> DEFINA SUA META DIÁRIA
             </span>
 
             <div className="grid grid-cols-3 gap-2 mb-3">
@@ -454,19 +440,21 @@ export default function AstraCapitalMasterTerminal() {
             </div>
 
             <div className="text-[11px] text-slate-400 leading-relaxed bg-[#050811] p-2.5 rounded-lg border border-[#141d2d]">
-              💡 <strong>Regra de consistência:</strong> Bateu os R$ 25? Saia da frente da tela para preservar o ganho.
+              💡 <strong>Automação Inteligente:</strong> Ao bater os R$ 25, o robô desliga na hora e trava as ordens para você não devolver o dinheiro.
             </div>
           </div>
 
-          {/* TELEMETRIA & LOG DE ORDENS */}
+          {/* LOG DE ORDENS DO ROBÔ */}
           <div className="bg-[#080c18] border border-[#141d2d] rounded-xl p-4 flex flex-col">
             <span className="text-xs font-bold text-slate-300 uppercase tracking-wider block mb-2 flex items-center gap-1.5">
-              <Terminal className="w-4 h-4 text-emerald-400" /> LIVRO DE EXECUÇÃO CAPITAL.COM
+              <Terminal className="w-4 h-4 text-emerald-400" /> ORDENS AUTOMÁTICAS DO ROBÔ
             </span>
 
-            <div className="space-y-2 max-h-[300px] overflow-y-auto font-mono text-[11px] pr-1">
+            <div className="space-y-2 max-h-[320px] overflow-y-auto font-mono text-[11px] pr-1">
               {auditLog.length === 0 ? (
-                <div className="text-slate-500 italic p-3 text-center">Nenhuma ordem enviada. Escolha um ativo e consulte o Astra.</div>
+                <div className="text-slate-500 italic p-3 text-center">
+                  O robô está em espera. Clique no botão verde no topo para ligar a automação.
+                </div>
               ) : (
                 auditLog.map((log, idx) => (
                   <div key={idx} className="p-2.5 bg-[#050811] border border-[#141d2d] rounded-lg text-slate-300">
