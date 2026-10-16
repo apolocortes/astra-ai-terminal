@@ -24,12 +24,12 @@ export async function GET(req: Request) {
 
     const last = candles[candles.length - 1];
     const prev = candles[candles.length - 2];
-    const closes = candles.map((c: any) => c.close);
+    const closes: number[] = candles.map((c: any) => c.close);
 
     // 1. EMA 9, 21, 200
     const calcEMA = (period: number, prices: number[]) => {
       const k = 2 / (period + 1);
-      let val = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+      let val = prices.slice(0, period).reduce((a: number, b: number) => a + b, 0) / period;
       for (let i = period; i < prices.length; i++) val = prices[i] * k + val * (1 - k);
       return val;
     };
@@ -54,8 +54,9 @@ export async function GET(req: Request) {
     const rsi14 = 100 - (100 / (1 + rs));
 
     // 4. Bandas de Bollinger (SMA 20 + 2 Desvios Padrão)
-    const sma20 = closes.slice(-20).reduce((a, b) => a + b, 0) / 20;
-    const variance = closes.slice(-20).reduce((acc, val) => acc + Math.pow(val - sma20, 2), 0) / 20;
+    const last20 = closes.slice(-20);
+    const sma20 = last20.reduce((a: number, b: number) => a + b, 0) / 20;
+    const variance = last20.reduce((acc: number, val: number) => acc + Math.pow(val - sma20, 2), 0) / 20;
     const stdDev = Math.sqrt(variance);
     const bbUpper = sma20 + (stdDev * 2);
     const bbLower = sma20 - (stdDev * 2);
@@ -69,8 +70,8 @@ export async function GET(req: Request) {
 
     // 6. Oscilador Estocástico (%K e %D)
     const last14 = candles.slice(-14);
-    const highestHigh14 = Math.max(...last14.map(c => c.high));
-    const lowestLow14 = Math.min(...last14.map(c => c.low));
+    const highestHigh14 = Math.max(...last14.map((c: any) => c.high));
+    const lowestLow14 = Math.min(...last14.map((c: any) => c.low));
     const stochK = ((last.close - lowestLow14) / ((highestHigh14 - lowestLow14) || 1)) * 100;
     const stochD = stochK * 0.92;
 
