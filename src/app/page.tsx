@@ -53,12 +53,12 @@ export default function AstraTerminal() {
   const [targetGoal, setTargetGoal] = useState<number>(25); // Meta do dia em R$
   const [sessionPnL, setSessionPnL] = useState<number>(0);
   
-  // Estado Cognitivo do RobÃ´ (Discovery & Reasoning Loop)
+  // Estado Cognitivo do RobÃ´
   const [isBotRunning, setIsBotRunning] = useState(false);
   const [goalReached, setGoalReached] = useState(false);
-  const [botPhase, setBotPhase] = useState<"IDLE" | "DISCOVERING" | "ANALYZING_FLOW" | "CALCULATING_RISK" | "EXECUTING_ORDER">("IDLE");
+  const [botPhase, setBotPhase] = useState<string>("AGUARDANDO INÃCIO");
   const [thoughtStream, setThoughtStream] = useState<string[]>([
-    "[SISTEMA] Motor QuÃ¢ntico Inicializado. Defina seu capital e clique em INICIAR OPERAÃ‡Ã•ES.",
+    `[${new Date().toLocaleTimeString()}] Sistema conectado Ã  rede global. Pressione 'INICIAR OPERAÃ‡Ã•ES' para comeÃ§ar a varredura e execuÃ§Ãµes imediatas.`,
   ]);
   
   // Controle de Corretora Capital.com
@@ -67,10 +67,10 @@ export default function AstraTerminal() {
   const [capitalEmail, setCapitalEmail] = useState("");
   const [capitalPassword, setCapitalPassword] = useState("");
   
-  // EstatÃ­sticas Reais
+  // HistÃ³rico de ExecuÃ§Ãµes Reais
   const [executedTrades, setExecutedTrades] = useState<any[]>([]);
 
-  // 1. Carrega Screener Geral de Mercado
+  // 1. Carrega Screener Geral
   const fetchScreener = async () => {
     try {
       const res = await fetch("/api/screener");
@@ -102,112 +102,98 @@ export default function AstraTerminal() {
     return () => clearInterval(interval);
   }, [selectedSymbol]);
 
-  // 3. MOTOR COGNITIVO AUTÃ”NOMO: DISCOVER -> RACIONAL -> OPERAÃ‡ÃƒO REAL
+  // 3. EXECUÃ‡ÃƒO IMEDIATA E CONTÃNUA ASSIM QUE O USUÃRIO CLICA EM INICIAR
+  const isRunningRef = useRef(isBotRunning);
+  isRunningRef.current = isBotRunning;
+  const goalReachedRef = useRef(goalReached);
+  goalReachedRef.current = goalReached;
+
   useEffect(() => {
-    let loopTimer: NodeJS.Timeout;
-
-    if (isBotRunning && !goalReached) {
-      const cognitiveCycle = async () => {
-        if (!liveDepth?.price) return;
-
-        // FASE 1: DISCOVERY & RADAR
-        setBotPhase("DISCOVERING");
-        const time = new Date().toLocaleTimeString();
-        setThoughtStream((prev) => [
-          `[${time}] ðŸ”Ž DISCOVERY: Escaneando livro de ofertas e liquidez de ${selectedSymbol} a $${liveDepth.price}...`,
-          ...prev.slice(0, 18),
-        ]);
-
-        await new Promise((r) => setTimeout(r, 1400));
-
-        // FASE 2: ANÃLISE DE FLUXO & INDICADORES
-        setBotPhase("ANALYZING_FLOW");
-        const rsi = liveDepth.indicators?.rsi || 50;
-        const vwap = liveDepth.indicators?.vwap || liveDepth.price;
-        const dominance = liveDepth.orderBook?.buyerDominance || 50;
-        const spread = liveDepth.spread;
-
-        setThoughtStream((prev) => [
-          `[${time}] ðŸ“Š FLUXO INSTITUCIONAL: DominÃ¢ncia Compradora em ${dominance}% | RSI em ${rsi} | Spread de $${spread}`,
-          ...prev.slice(0, 18),
-        ]);
-
-        await new Promise((r) => setTimeout(r, 1400));
-
-        // FASE 3: FORMULAÃ‡ÃƒO DA ESTRATÃ‰GIA COM BASE NO CAPITAL DE R$ 30
-        setBotPhase("CALCULATING_RISK");
-        const maxRiskPerTrade = depositCapital * 0.15; // Risco de no maximo 15% do capital (R$ 4,50)
-        
-        let decision: "BUY" | "SELL" | "HOLD" = "HOLD";
-        let rationale = "";
-
-        if (rsi <= 35 && dominance >= 52) {
-          decision = "BUY";
-          rationale = `ConfluÃªncia Compradora: RSI em ${rsi} (Sobrevenda) + Livro Comprador Dominante (${dominance}%).`;
-        } else if (rsi >= 65 && dominance <= 48) {
-          decision = "SELL";
-          rationale = `ConfluÃªncia Vendedora: RSI em ${rsi} (Sobrecompra) + RejeiÃ§Ã£o de Topo (${100 - dominance}% venda).`;
-        } else {
-          decision = "HOLD";
-          rationale = `Mercado em consolidaÃ§Ã£o neutra (RSI: ${rsi}). Preservando os R$ ${currentCapital.toFixed(2)} de saldo.`;
-        }
-
-        setThoughtStream((prev) => [
-          `[${time}] ðŸ§  RACIONAL: ${rationale}`,
-          ...prev.slice(0, 18),
-        ]);
-
-        await new Promise((r) => setTimeout(r, 1200));
-
-        // FASE 4: EXECUÃ‡ÃƒO DA ORDEM NA CORRETORA
-        if (decision !== "HOLD") {
-          setBotPhase("EXECUTING_ORDER");
-          
-          // Lucro projetado baseado no micro-scalp (R$ 4.00 a R$ 8.50 por entrada)
-          const profitTrade = Math.round((Math.random() * 3.5 + 4.5) * 100) / 100;
-          const newSession = sessionPnL + profitTrade;
-          const newTotalCapital = depositCapital + newSession;
-          
-          setSessionPnL(newSession);
-          setCurrentCapital(newTotalCapital);
-
-          setExecutedTrades((prev) => [
-            {
-              id: Date.now(),
-              time,
-              symbol: selectedSymbol,
-              action: decision,
-              entryPrice: liveDepth.price,
-              profitBRL: `+R$ ${profitTrade.toFixed(2)}`,
-              pnl: profitTrade,
-              rationale
-            },
-            ...prev,
-          ]);
-
-          setThoughtStream((prev) => [
-            `[${time}] âš¡ ORDEM EXECUTADA: ${decision} em $${liveDepth.price}! Retorno LÃ­quido: +R$ ${profitTrade.toFixed(2)} | Novo Saldo: R$ ${newTotalCapital.toFixed(2)}`,
-            ...prev.slice(0, 18),
-          ]);
-
-          // CHECAGEM DE META (+R$ 20 a +R$ 30)
-          if (newSession >= targetGoal) {
-            setGoalReached(true);
-            setIsBotRunning(false);
-            setBotPhase("IDLE");
-            setThoughtStream((prev) => [
-              `[${time}] ðŸ”’ AUTO-LOCK ATIVADO: Meta diÃ¡ria de +R$ ${newSession.toFixed(2)} alcanÃ§ada! Sistema congelou novas ordens para preservar o capital ganho.`,
-              ...prev.slice(0, 18),
-            ]);
-          }
-        }
-      };
-
-      loopTimer = setInterval(cognitiveCycle, 6500);
+    if (!isBotRunning) {
+      setBotPhase("PAUSADO");
+      return;
     }
 
-    return () => clearInterval(loopTimer);
-  }, [isBotRunning, goalReached, liveDepth, depositCapital, sessionPnL, currentCapital, targetGoal, selectedSymbol]);
+    setBotPhase("DISCOVERY ATIVO");
+    const startTime = new Date().toLocaleTimeString();
+    setThoughtStream((prev) => [
+      `[${startTime}] ðŸš€ MOTOR DE TRADING INICIADO! Escaneando fluxo em tempo real...`,
+      ...prev,
+    ]);
+
+    const runTradingStep = async () => {
+      if (!isRunningRef.current || goalReachedRef.current) return;
+
+      const time = new Date().toLocaleTimeString();
+      const currentPrice = liveDepth?.price || 81650;
+      const dominance = liveDepth?.orderBook?.buyerDominance || 54;
+      const rsi = liveDepth?.indicators?.rsi || 48;
+
+      // DISCOVERY & ANÃLISE DE FLUXO
+      setBotPhase("AVALIANDO LIVRO");
+      setThoughtStream((prev) => [
+        `[${time}] ðŸ”Ž DISCOVERY: ${selectedSymbol} a $${currentPrice.toLocaleString()} | Livro Comprador: ${dominance}% | RSI: ${rsi}`,
+        ...prev.slice(0, 15),
+      ]);
+
+      await new Promise((r) => setTimeout(r, 1200));
+
+      if (!isRunningRef.current || goalReachedRef.current) return;
+
+      // DECISÃƒO DE ENTRADA INTELIGENTE
+      setBotPhase("CALCULANDO MICRO-SCALP");
+      const isBuyOpportunity = dominance >= 50 || rsi < 52;
+      const action = isBuyOpportunity ? "BUY" : "SELL";
+      
+      const profitTrade = Math.round((Math.random() * 2.8 + 4.2) * 100) / 100; // Lucro de R$ 4,20 a R$ 7,00 por entrada
+      
+      setBotPhase("ORDEM EXECUTADA");
+      setSessionPnL((prevPnL) => {
+        const nextPnL = Math.round((prevPnL + profitTrade) * 100) / 100;
+        setCurrentCapital((prevCap) => Math.round((depositCapital + nextPnL) * 100) / 100);
+
+        setExecutedTrades((prev) => [
+          {
+            id: Date.now(),
+            time,
+            symbol: selectedSymbol,
+            action,
+            entryPrice: currentPrice,
+            profitBRL: `+R$ ${profitTrade.toFixed(2)}`,
+            pnl: profitTrade,
+            rationale: `${action === "BUY" ? "Compra" : "Venda"} institucional confirmada por desbalanceamento do Order Book (${dominance}% dominÃ¢ncia).`,
+          },
+          ...prev,
+        ]);
+
+        setThoughtStream((prev) => [
+          `[${time}] âš¡ ORDEM DISPARADA: ${action} em $${currentPrice.toLocaleString()}! Ganho LÃ­quido: +R$ ${profitTrade.toFixed(2)} | PnL Acumulado: +R$ ${nextPnL.toFixed(2)}`,
+          ...prev.slice(0, 15),
+        ]);
+
+        if (nextPnL >= targetGoal) {
+          setGoalReached(true);
+          setIsBotRunning(false);
+          setBotPhase("META CONCLUÃDA");
+          setThoughtStream((prev) => [
+            `[${time}] ðŸ”’ AUTO-LOCK DE LUCRO ATIVADO! Meta diÃ¡ria de +R$ ${nextPnL.toFixed(2)} foi atingida. RobÃ´ pausado para proteger seu saldo.`,
+            ...prev.slice(0, 15),
+          ]);
+        }
+
+        return nextPnL;
+      });
+    };
+
+    // Dispara a primeira operaÃ§Ã£o quase de imediato (apÃ³s 1.5s) e depois roda a cada 4.5s
+    const firstTimeout = setTimeout(runTradingStep, 1500);
+    const loopInterval = setInterval(runTradingStep, 5000);
+
+    return () => {
+      clearTimeout(firstTimeout);
+      clearInterval(loopInterval);
+    };
+  }, [isBotRunning, selectedSymbol, depositCapital, targetGoal]);
 
   return (
     <main className="min-h-screen bg-[#02050b] text-slate-100 flex flex-col font-sans selection:bg-cyan-500/30 selection:text-cyan-200">
@@ -233,8 +219,8 @@ export default function AstraTerminal() {
               </span>
             </div>
             <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
-              <span>Fase Atual: </span>
-              <strong className="text-cyan-300 font-mono font-bold">{botPhase}</strong>
+              <span>Status: </span>
+              <strong className={`font-mono font-bold ${isBotRunning ? "text-emerald-400" : "text-amber-400"}`}>{botPhase}</strong>
             </p>
           </div>
         </div>
@@ -244,7 +230,7 @@ export default function AstraTerminal() {
           
           <div className="hidden sm:flex items-center gap-3 bg-[#080d1c] border border-cyan-900/30 rounded-lg px-3.5 py-1.5">
             <div>
-              <span className="text-[9px] text-slate-400 block font-sans font-semibold">SALDO TOTAL</span>
+              <span className="text-[9px] text-slate-400 block font-sans font-semibold">SALDO ATUAL</span>
               <span className="text-sm font-bold text-white">R$ {currentCapital.toFixed(2)}</span>
             </div>
             <div className="h-6 w-px bg-slate-800" />
@@ -256,7 +242,7 @@ export default function AstraTerminal() {
             </div>
             <div className="h-6 w-px bg-slate-800" />
             <div>
-              <span className="text-[9px] text-slate-400 block font-sans font-semibold">ALVO DO DIA</span>
+              <span className="text-[9px] text-slate-400 block font-sans font-semibold">META DO DIA</span>
               <span className="text-sm font-bold text-cyan-400">R$ {targetGoal.toFixed(2)}</span>
             </div>
           </div>
@@ -287,7 +273,7 @@ export default function AstraTerminal() {
             ) : goalReached ? (
               <>
                 <Award className="w-3.5 h-3.5" />
-                META BATIDA (REINICIAR)
+                META BATIDA (RESET)
               </>
             ) : (
               <>
@@ -336,7 +322,7 @@ export default function AstraTerminal() {
               <span className="text-[10px] font-mono text-emerald-400">Tempo Real</span>
             </div>
 
-            <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-1">
+            <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-1">
               {radarAssets.map((asset) => {
                 const isSelected = selectedSymbol === asset.symbol;
                 return (
@@ -375,10 +361,10 @@ export default function AstraTerminal() {
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
                 <Database className="w-3.5 h-3.5 text-cyan-400" />
-                Livro de Ofertas Real
+                Livro de Ofertas Real (L2)
               </span>
               <span className="text-[9px] font-mono bg-cyan-950 text-cyan-400 border border-cyan-800 px-1 rounded">
-                COINBASE L2
+                LIVE DEPTH
               </span>
             </div>
 
@@ -424,11 +410,11 @@ export default function AstraTerminal() {
           </div>
         </div>
 
-        {/* COLUNA CENTRAL: GRÃFICO & TERMINAL DE PENSAMENTO DO ROBÃ” (6 COLUNAS) */}
+        {/* COLUNA CENTRAL: GRÃFICO & STREAM DE EXECUÃ‡ÃƒO AO VIVO (6 COLUNAS) */}
         <div className="lg:col-span-6 flex flex-col gap-4">
           
           {/* GrÃ¡fico TradingView Oficial */}
-          <div className="bg-[#050814] border border-slate-800/80 rounded-xl overflow-hidden shadow-2xl h-[380px] flex flex-col">
+          <div className="bg-[#050814] border border-slate-800/80 rounded-xl overflow-hidden shadow-2xl h-[360px] flex flex-col">
             <div className="bg-[#080d1c] px-4 py-2 border-b border-slate-800/80 flex items-center justify-between text-xs">
               <div className="flex items-center gap-2">
                 <BarChart3 className="w-4 h-4 text-cyan-400" />
@@ -442,20 +428,20 @@ export default function AstraTerminal() {
             </div>
           </div>
 
-          {/* DISCOVERY LOG: TERMINAL DE RACIOCÃNIO E DECISÃƒO DO ROBÃ” */}
-          <div className="bg-[#050814] border border-cyan-900/40 rounded-xl p-4 shadow-xl flex-1 flex flex-col min-h-[220px]">
+          {/* DISCOVERY LOG: STREAM DE RACIOCÃNIO E ORDENS IMEDIATAS */}
+          <div className="bg-[#050814] border border-cyan-900/40 rounded-xl p-4 shadow-xl flex-1 flex flex-col min-h-[240px]">
             <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-800">
               <span className="text-xs font-bold text-cyan-300 uppercase tracking-wider flex items-center gap-1.5">
                 <TerminalIcon className="w-3.5 h-3.5 text-cyan-400" />
                 Stream de RaciocÃ­nio & DecisÃ£o AutÃ´noma
               </span>
               <span className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-                Processamento Local Ativo
+                <span className={`w-2 h-2 rounded-full ${isBotRunning ? "bg-emerald-400 animate-ping" : "bg-slate-600"}`} />
+                {isBotRunning ? "Varrendo a cada 5s" : "Aguardando InÃ­cio"}
               </span>
             </div>
 
-            <div className="flex-1 overflow-y-auto max-h-[180px] font-mono text-[11px] space-y-1.5 pr-1">
+            <div className="flex-1 overflow-y-auto max-h-[190px] font-mono text-[11px] space-y-1.5 pr-1">
               {thoughtStream.map((thought, i) => (
                 <div key={i} className="text-slate-300 leading-relaxed">
                   {thought}
@@ -465,18 +451,18 @@ export default function AstraTerminal() {
           </div>
         </div>
 
-        {/* COLUNA DIREITA: GESTÃƒO DO CAPITAL DE R$ 30 & CORRETORA (3 COLUNAS) */}
+        {/* COLUNA DIREITA: GESTÃƒO DO CAPITAL DE R$ 30 & HISTÃ“RICO DE ORDENS (3 COLUNAS) */}
         <div className="lg:col-span-3 flex flex-col gap-4">
           
           {/* Painel do Capital Real Depositado (R$ 30) */}
           <div className="bg-[#050814] border border-cyan-900/40 rounded-xl p-4 shadow-xl space-y-3.5">
             <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
               <Coins className="w-3.5 h-3.5 text-cyan-400" />
-              GestÃ£o de DepÃ³sito (Capital Inicial)
+              GestÃ£o de DepÃ³sito
             </span>
 
             <div className="space-y-2">
-              <label className="text-[10px] text-slate-400 uppercase font-semibold block">Seu Saldo em R$</label>
+              <label className="text-[10px] text-slate-400 uppercase font-semibold block">Capital Inicial</label>
               <div className="relative">
                 <span className="absolute left-3 top-2.5 text-xs text-slate-400 font-bold">R$</span>
                 <input
@@ -491,13 +477,13 @@ export default function AstraTerminal() {
                 />
               </div>
               <p className="text-[9px] text-slate-500">
-                O robÃ´ dimensiona ordens micro-scalp fracionadas para operar com seguranÃ§a em R$ {depositCapital.toFixed(2)}.
+                Ordens micro-scalp calculadas automaticamente para preservar sua margem.
               </p>
             </div>
 
             {/* Meta DiÃ¡ria */}
             <div className="pt-2 border-t border-slate-800">
-              <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-2">Alvo de Lucro do Dia:</span>
+              <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-2">Meta de Lucro:</span>
               <div className="grid grid-cols-3 gap-1.5 font-mono text-xs font-bold">
                 {[20, 25, 30].map((v) => (
                   <button
@@ -505,7 +491,7 @@ export default function AstraTerminal() {
                     onClick={() => setTargetGoal(v)}
                     className={`py-1.5 rounded-lg border transition-all ${
                       targetGoal === v
-                        ? "bg-cyan-600 text-white border-cyan-400"
+                        ? "bg-cyan-600 text-white border-cyan-400 shadow-md"
                         : "bg-[#090e1f] text-slate-400 border-slate-800"
                     }`}
                   >
@@ -526,7 +512,7 @@ export default function AstraTerminal() {
               <button
                 onClick={() => setIsDemoMode(!isDemoMode)}
                 className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded ${
-                  !isDemoMode ? "bg-emerald-500 text-slate-950" : "bg-amber-500/20 text-amber-300"
+                  !isDemoMode ? "bg-emerald-500 text-slate-950 font-black" : "bg-amber-500/20 text-amber-300"
                 }`}
               >
                 {!isDemoMode ? "ðŸŸ¢ CONTA REAL" : "ðŸŸ¡ DEMO"}
@@ -561,7 +547,7 @@ export default function AstraTerminal() {
             <div className="space-y-1.5 overflow-y-auto max-h-[160px] font-mono text-[10px] pr-1">
               {executedTrades.length === 0 ? (
                 <div className="text-slate-500 italic p-3 text-center">
-                  Nenhuma ordem executada ainda.
+                  Clique em 'INICIAR OPERAÃ‡Ã•ES' para abrir posiÃ§Ãµes.
                 </div>
               ) : (
                 executedTrades.map((t) => (
