@@ -1,144 +1,78 @@
-/**
- * CAPITAL.COM REST API CLIENT (OpenAPI v1)
- * Suporta autenticação por API Key + Custom Password (Session Token CUST & CST).
- * Executa ordens reais no mercado global (Cripto, Forex, Índices, Ações).
- */
-
+/** Cliente legado somente para leitura. Nenhuma rota pública utiliza este cliente. */
 export interface CapitalCredentials {
   apiKey: string;
-  identifier: string; // E-mail da conta Capital.com
-  password?: string;   // Custom password configurada na API key
-  isDemo?: boolean;    // true para conta de testes / false para dinheiro real
+  identifier: string;
+  password?: string;
+  isDemo?: boolean;
 }
-
 export class CapitalComClient {
   private baseUrl: string;
-  private apiKey: string;
-  private identifier: string;
-  private password?: string;
+  private credentials: CapitalCredentials;
   private cstToken: string | null = null;
-  private xSecurityToken: string | null = null;
-
+  private securityToken: string | null = null;
   constructor(creds: CapitalCredentials) {
-    this.apiKey = creds.apiKey;
-    this.identifier = creds.identifier;
-    this.password = creds.password;
-    // URL Demo vs Live
-    this.baseUrl = creds.isDemo
-      ? "https://demo-api-capital.backend-capital.com/api/v1"
-      : "https://api-capital.backend-capital.com/api/v1";
+    if (!creds.apiKey || !creds.identifier || !creds.password)
+      throw new Error("Credenciais da corretora ausentes.");
+    if (creds.isDemo !== true)
+      throw new Error("Conta real não habilitada nesta versão.");
+    this.credentials = creds;
+    this.baseUrl = "https://demo-api-capital.backend-capital.com/api/v1";
   }
-
-  /**
-   * Autentica e gera os tokens de sessão (CST e X-SECURITY-TOKEN)
-   */
   public async createSession(): Promise<boolean> {
-    try {
-      const res = await fetch(`${this.baseUrl}/session`, {
-        method: "POST",
-        headers: {
-          "X-CAP-API-KEY": this.apiKey,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          identifier: this.identifier,
-          password: this.password,
-        }),
-      });
-
-      if (!res.ok) {
-        const err = await res.text();
-        throw new Error(`Capital.com Session Error: ${res.status} - ${err}`);
-      }
-
-      this.cstToken = res.headers.get("CST");
-      this.xSecurityToken = res.headers.get("X-SECURITY-TOKEN");
-      return true;
-    } catch (e: any) {
-      console.error("[CapitalCom] Auth Failed:", e.message);
-      return false;
-    }
-  }
-
-  /**
-   * Puxa o saldo real da conta na Capital.com
-   */
-  public async getAccountBalance() {
-    if (!this.cstToken || !this.xSecurityToken) {
-      const ok = await this.createSession();
-      if (!ok) {
-        // Retorna simulado se ainda não tiver e-mail/senha logados
-        return {
-          connected: false,
-          balanceBRL: 500.0,
-          currency: "BRL",
-          status: "SIMULATED_STANDBY",
-          message: "Aguardando e-mail/senha da Capital.com para liberar saldo real.",
-        };
-      }
-    }
-
-    const res = await fetch(`${this.baseUrl}/accounts`, {
+    this.cstToken = null;
+    this.securityToken = null;
+    const res = await fetch(`${this.baseUrl}/session`, {
+      method: "POST",
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
       headers: {
-        "X-CAP-API-KEY": this.apiKey,
-        "CST": this.cstToken!,
-        "X-SECURITY-TOKEN": this.xSecurityToken!,
+        "X-CAP-API-KEY": this.credentials.apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        identifier: this.credentials.identifier,
+        password: this.credentials.password,
+      }),
+    });
+    if (!res.ok) throw new Error("Autenticação na corretora recusada.");
+    const cst = res.headers.get("CST");
+    const security = res.headers.get("X-SECURITY-TOKEN");
+    if (!cst || !security)
+      throw new Error("Sessão da corretora sem tokens válidos.");
+    this.cstToken = cst;
+    this.securityToken = security;
+    return true;
+  }
+  public async getAccountBalance() {
+    if (!this.cstToken || !this.securityToken) await this.createSession();
+    const res = await fetch(`${this.baseUrl}/accounts`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+      headers: {
+        "X-CAP-API-KEY": this.credentials.apiKey,
+        CST: this.cstToken!,
+        "X-SECURITY-TOKEN": this.securityToken!,
       },
     });
-
-    if (!res.ok) throw new Error("Falha ao puxar contas Capital.com");
+    if (!res.ok) throw new Error("Não foi possível consultar a conta demo.");
     const data = await res.json();
+    if (!Array.isArray(data.accounts))
+      throw new Error("Resposta inválida da corretora.");
     return {
       connected: true,
       accounts: data.accounts,
-      status: "AUTHENTICATED_LIVE",
+      status: "AUTHENTICATED_DEMO",
     };
   }
-
-  /**
-   * Envia ordem a mercado (Comprar ou Vender com TP e SL automáticos)
-   */
-  public async placeMarketOrder(epic: string, direction: "BUY" | "SELL", size: number, stopLevel?: number, profitLevel?: number) {
-    if (!this.cstToken || !this.xSecurityToken) {
-      const ok = await this.createSession();
-      if (!ok) {
-        return {
-          success: true,
-          mode: "PAPER_TRADING_STANDBY",
-          orderId: `SIM_${Date.now()}`,
-          epic,
-          direction,
-          size,
-          message: "Ordem simulada pelo Astra enquanto valida credenciais de sessão.",
-        };
-      }
-    }
-
-    const body: any = {
-      epic,
-      direction,
-      size,
-      guaranteedStop: false,
-    };
-    if (stopLevel) body.stopLevel = stopLevel;
-    if (profitLevel) body.profitLevel = profitLevel;
-
-    const res = await fetch(`${this.baseUrl}/positions`, {
-      method: "POST",
-      headers: {
-        "X-CAP-API-KEY": this.apiKey,
-        "CST": this.cstToken!,
-        "X-SECURITY-TOKEN": this.xSecurityToken!,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      const err = await res.text();
-      throw new Error(`Ordem recusada pela Capital.com: ${err}`);
-    }
-
-    return await res.json();
+  public async placeMarketOrder(
+    _epic: string,
+    _direction: "BUY" | "SELL",
+    _size: number,
+    _stopLevel?: number,
+    _profitLevel?: number,
+  ): Promise<never> {
+    throw new Error(
+      "Envio de ordens desativado nesta versão. Não existe fallback de sucesso simulado.",
+    );
   }
 }

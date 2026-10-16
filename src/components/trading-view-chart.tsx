@@ -14,31 +14,18 @@ export default function TradingViewWidget({ symbol }: TradingViewWidgetProps) {
     container.current.innerHTML = "";
 
     const script = document.createElement("script");
-    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
+    script.src =
+      "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
     script.type = "text/javascript";
     script.async = true;
 
-    // Converte simbolo para formato TradingView
-    const tvSymbol = symbol.includes("BTC")
-      ? "BINANCE:BTCUSDT"
-      : symbol.includes("ETH")
-      ? "BINANCE:ETHUSDT"
-      : symbol.includes("SOL")
-      ? "BINANCE:SOLUSDT"
-      : symbol.includes("AVAX")
-      ? "BINANCE:AVAXUSDT"
-      : symbol.includes("LINK")
-      ? "BINANCE:LINKUSDT"
-      : symbol.includes("DOGE")
-      ? "BINANCE:DOGEUSDT"
-      : symbol.includes("XRP")
-      ? "BINANCE:XRPUSDT"
-      : "BINANCE:BTCUSDT";
+    // Mesma bolsa e moeda do feed; não confundir Binance USDT com Coinbase USD.
+    const tvSymbol = `COINBASE:${symbol.replace("-", "")}`;
 
     script.innerHTML = JSON.stringify({
       autosize: true,
       symbol: tvSymbol,
-      interval: "5",
+      interval: "1",
       timezone: "America/Sao_Paulo",
       theme: "dark",
       style: "1",
@@ -58,8 +45,11 @@ export default function TradingViewWidget({ symbol }: TradingViewWidgetProps) {
   }, [symbol]);
 
   return (
-    <div className="w-full h-full min-h-[440px] flex-1 rounded-xl overflow-hidden border border-[#162032] bg-[#070a12]">
-      <div className="tradingview-widget-container h-full w-full" ref={container} />
+    <div className="w-full h-full min-h-[320px] flex-1 overflow-hidden bg-[#070a12]">
+      <div
+        className="tradingview-widget-container h-full w-full"
+        ref={container}
+      />
     </div>
   );
 }
