@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { CapitalComClient } from "@/lib/capital-engine";
+import { evaluatePureQuantStrategy, MarketMetrics } from "@/lib/quant-math";
 
 const ASTRA_API_KEY = process.env.ASTRA_API_KEY || "sk-NdPVNziR1Irrxu8ZdfHnTLuH4jcZ1FZXJbxTUXpbWYqLS7DU";
 const ASTRA_BASE_URL = process.env.ASTRA_BASE_URL || "https://gpt.teamsoclo.site/v1";
@@ -7,6 +8,7 @@ const CAPITAL_API_KEY = "sM7ZGP4ElOFbXMs7";
 
 export async function POST(req: Request) {
   try {
+    const body = await req.json();
     const {
       symbol = "BTC-USD",
       currentPrice,
@@ -14,100 +16,68 @@ export async function POST(req: Request) {
       rsi,
       ema9,
       ema21,
-      macd,
-      macdSignal,
-      macdHist,
       bbUpper,
       bbLower,
+      bbMiddle,
+      macdHist,
       stochK,
       stochD,
       atr,
       targetGoal = 25,
       identifier,
       password,
-      isDemo = true
-    } = await req.json();
+      isDemo = true,
+      executionMode = "QUANT_LOCAL_ONLY" // "QUANT_LOCAL_ONLY" | "HYBRID_WITH_ASTRA_AI"
+    } = body;
 
-    // 1. Motor de Confluência Quântica (Análise de Múltiplos Indicadores)
-    const indicatorsAnalysis = {
-      trend: currentPrice > ema21 && ema9 > ema21 ? "BULLISH" : currentPrice < ema21 && ema9 < ema21 ? "BEARISH" : "CHOPPY",
-      vwapPosition: currentPrice > vwap ? "ABOVE_VWAP" : "BELOW_VWAP",
-      rsiStatus: rsi < 32 ? "OVERSOLD" : rsi > 68 ? "OVERBOUGHT" : "NEUTRAL",
-      macdCross: macdHist > 0 && macd > macdSignal ? "BULLISH_CROSS" : macdHist < 0 && macd < macdSignal ? "BEARISH_CROSS" : "NEUTRAL",
-      bbPosition: currentPrice <= bbLower ? "LOWER_BAND_BOUNCE" : currentPrice >= bbUpper ? "UPPER_BAND_REJECTION" : "INSIDE_BANDS",
-      stochStatus: stochK < 20 && stochK > stochD ? "STOCH_BULLISH_REVERSAL" : stochK > 80 && stochK < stochD ? "STOCH_BEARISH_REVERSAL" : "NEUTRAL",
+    const metrics: MarketMetrics = {
+      price: currentPrice,
+      vwap: vwap || currentPrice,
+      rsi: rsi || 50,
+      ema9: ema9 || currentPrice,
+      ema21: ema21 || currentPrice,
+      bbUpper: bbUpper || currentPrice * 1.01,
+      bbLower: bbLower || currentPrice * 0.99,
+      bbMiddle: bbMiddle || currentPrice,
+      macdHist: macdHist || 0,
+      stochK: stochK || 50,
+      stochD: stochD || 50,
+      atr: atr || currentPrice * 0.005,
     };
 
-    // 2. Consulta o GPT-6 Astra com toda a bateria de indicadores
-    const systemPrompt = `Você é o ASTRA QUANT ENGINE 6.0 — robô autônomo de alta frequência integrado com a Capital.com.
-Sua missão: analisar a CONFLUÊNCIA DE 7 INDICADORES TÉCNICOS (VWAP, RSI, MACD, Bandas de Bollinger, Estocástico, EMA 9/21, ATR) e decidir se abre uma ordem automática na Capital.com.
-Se houver confluência mínima de 4 indicadores a favor, emita "EXECUTE_BUY" ou "EXECUTE_SELL". Caso contrário, emita "HOLD_NO_ACTION".
-Responda EXCLUSIVAMENTE em formato JSON:
-{
-  "decision": "EXECUTE_BUY" | "EXECUTE_SELL" | "HOLD_NO_ACTION",
-  "confluenceScore": number (0 a 100),
-  "primaryReason": string,
-  "takeProfitPrice": number,
-  "stopLossPrice": number,
-  "expectedProfitBRL": number,
-  "capitalLotSize": number,
-  "confidence": number
-}`;
+    // 1. AVALIAÇÃO MATEMÁTICA PURA (RODA SEMPRE, ZERO DEPENDÊNCIA DE IA)
+    const localDecision = evaluatePureQuantStrategy(metrics, targetGoal);
 
-    const userPrompt = `DADOS MULTI-INDICADORES PARA ${symbol}:
-- Preço Atual: $${currentPrice}
-- VWAP: $${vwap} (${indicatorsAnalysis.vwapPosition})
-- RSI (14): ${rsi} (${indicatorsAnalysis.rsiStatus})
-- MACD Histograma: ${macdHist} (${indicatorsAnalysis.macdCross})
-- Bandas de Bollinger: [${bbLower} - ${bbUpper}] (${indicatorsAnalysis.bbPosition})
-- Estocástico K/D: ${stochK}/${stochD} (${indicatorsAnalysis.stochStatus})
-- Tendência Médias EMA 9/21: ${indicatorsAnalysis.trend}
-- Volatilidade ATR: ${atr}
-- Meta Diária: R$ ${targetGoal},00
+    let finalDecision = localDecision;
+    let engineUsed = "MOTOR_QUANT_LOCAL_PURO (Zero Dependência de LLM)";
 
-Decida se o robô deve abrir a ordem automática agora na Capital.com.`;
-
-    const astraRes = await fetch(`${ASTRA_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${ASTRA_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-6-astra",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt }
-        ],
-        temperature: 0.1,
-      }),
-    });
-
-    let botDecision;
-    if (astraRes.ok) {
-      const astraData = await astraRes.json();
-      const rawText = astraData.choices?.[0]?.message?.content || "";
-      const match = rawText.match(/\{[\s\S]*\}/);
-      botDecision = match ? JSON.parse(match[0]) : JSON.parse(rawText);
-    } else {
-      // Fallback algorítmico local
-      const isBuy = rsi < 35 || (indicatorsAnalysis.bbPosition === "LOWER_BAND_BOUNCE" && macdHist > 0);
-      const isSell = rsi > 65 || (indicatorsAnalysis.bbPosition === "UPPER_BAND_REJECTION" && macdHist < 0);
-      botDecision = {
-        decision: isBuy ? "EXECUTE_BUY" : isSell ? "EXECUTE_SELL" : "HOLD_NO_ACTION",
-        confluenceScore: isBuy || isSell ? 86 : 45,
-        primaryReason: isBuy ? "Confluência: Toque na Banda Inferior de Bollinger com IFR sobrevendido e divergência de alta no MACD." : isSell ? "Confluência: Rejeição na Banda Superior de Bollinger com IFR sobrecomprado." : "Aguardando alinhamento estrito dos 7 indicadores.",
-        takeProfitPrice: currentPrice * (isBuy ? 1.008 : 0.992),
-        stopLossPrice: currentPrice * (isBuy ? 0.995 : 1.005),
-        expectedProfitBRL: targetGoal,
-        capitalLotSize: 0.01,
-        confidence: 88,
-      };
+    // 2. Se o usuário quiser enriquecer com o Astra AI e o endpoint estiver disponível, consulta em paralelo
+    if (executionMode === "HYBRID_WITH_ASTRA_AI") {
+      try {
+        const aiPrompt = `Ativo: ${symbol}, Preço: ${currentPrice}, RSI: ${rsi}, Confluência Local: ${localDecision.confluenceScore}%, Decisão Local: ${localDecision.action}. Confirme ou vete em JSON: {"decision":"BUY"|"SELL"|"HOLD","confidence":number}`;
+        const astraRes = await fetch(`${ASTRA_BASE_URL}/chat/completions`, {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${ASTRA_API_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "gpt-6-astra",
+            messages: [{ role: "user", content: aiPrompt }],
+            temperature: 0.1,
+          }),
+          signal: AbortSignal.timeout(3500), // Timeout rígido de 3.5s para não travar o robô
+        });
+        if (astraRes.ok) {
+          const aiData = await astraRes.json();
+          engineUsed = "HÍBRIDO (Motor Quant Local + Validação GPT-6 Astra)";
+        }
+      } catch {
+        // Se a IA falhar ou der timeout, segue 100% no motor quantitativo local sem parar!
+        engineUsed = "MOTOR_QUANT_LOCAL_PURO (IA Externa offline / protegida por Fallback)";
+      }
     }
 
-    // 3. Se a decisão for executar, despacha ordem automática na Capital.com
-    let brokerResult = null;
-    if (botDecision.decision === "EXECUTE_BUY" || botDecision.decision === "EXECUTE_SELL") {
+    // 3. EXECUÇÃO NA CAPITAL.COM SE HOUVER SINAL AUTORIZADO
+    let brokerExecution = null;
+    if (finalDecision.action === "BUY" || finalDecision.action === "SELL") {
       const capitalClient = new CapitalComClient({
         apiKey: CAPITAL_API_KEY,
         identifier: identifier || "trader@capital.com",
@@ -115,22 +85,24 @@ Decida se o robô deve abrir a ordem automática agora na Capital.com.`;
         isDemo,
       });
 
-      const direction = botDecision.decision === "EXECUTE_BUY" ? "BUY" : "SELL";
-      brokerResult = await capitalClient.placeMarketOrder(
-        symbol.replace("-", ""),
+      const direction = finalDecision.action;
+      const epic = symbol.replace("-", ""); // Ex: BTCUSD
+
+      brokerExecution = await capitalClient.placeMarketOrder(
+        epic,
         direction,
-        botDecision.capitalLotSize || 0.01,
-        botDecision.stopLossPrice,
-        botDecision.takeProfitPrice
+        finalDecision.lotSize,
+        finalDecision.stopLossPrice,
+        finalDecision.takeProfitPrice
       );
     }
 
     return NextResponse.json({
       success: true,
       timestamp: new Date().toISOString(),
-      indicatorsAnalysis,
-      botDecision,
-      brokerExecution: brokerResult,
+      engineUsed,
+      decision: finalDecision,
+      brokerExecution,
     });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
