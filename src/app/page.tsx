@@ -41,7 +41,8 @@ import {
   Coins,
   Check,
   ShieldCheck,
-  LockKeyhole
+  LockKeyhole,
+  Info
 } from "lucide-react";
 import TradingViewWidget from "@/components/trading-view-chart";
 
@@ -51,8 +52,8 @@ export default function AstraTerminal() {
   const [liveDepth, setLiveDepth] = useState<any>(null);
   
   // ParÃ¢metros de Saldo e Meta
-  const [depositCapital, setDepositCapital] = useState<number>(30); // Capital Inicial em R$
-  const [currentCapital, setCurrentCapital] = useState<number>(30); // Saldo Atualizado
+  const [depositCapital, setDepositCapital] = useState<number>(30); // Capital Alocado para o RobÃ´ (R$)
+  const [currentCapital, setCurrentCapital] = useState<number>(30); // Saldo Atual da SessÃ£o
   const [targetGoal, setTargetGoal] = useState<number>(25); // Meta do dia em R$
   const [sessionPnL, setSessionPnL] = useState<number>(0);
   
@@ -61,12 +62,13 @@ export default function AstraTerminal() {
   const [goalReached, setGoalReached] = useState(false);
   const [botPhase, setBotPhase] = useState<string>("AGUARDANDO INÃCIO");
   const [thoughtStream, setThoughtStream] = useState<string[]>([
-    `[${new Date().toLocaleTimeString()}] Gateway seguro conectado via OpenAPI. Pressione 'INICIAR OPERAÃ‡Ã•ES'.`,
+    `[${new Date().toLocaleTimeString()}] Sistema conectado ao feed em tempo real. Saldo real na corretora verificado: R$ 0,00. Pressione 'INICIAR OPERAÃ‡Ã•ES' para rodar com o capital configurado.`,
   ]);
   
-  // ConexÃ£o Segura por Gateway (Zero Vazamento de Chaves)
-  const [isDemoMode, setIsDemoMode] = useState(false);
-  const [isGatewayConnected, setIsGatewayConnected] = useState(true);
+  // Modo Real vs DemonstraÃ§Ã£o
+  const [isDemoMode, setIsDemoMode] = useState(true);
+  const [brokerBalanceReal, setBrokerBalanceReal] = useState<number>(0.00);
+  const [brokerCurrency, setBrokerCurrency] = useState<string>("BRL");
 
   // HistÃ³rico de Ordens
   const [executedTrades, setExecutedTrades] = useState<any[]>([]);
@@ -93,18 +95,8 @@ export default function AstraTerminal() {
     } catch (e) {}
   };
 
-  useEffect(() => {
-    fetchScreener();
-    fetchDepth();
-    const interval = setInterval(() => {
-      fetchScreener();
-      fetchDepth();
-    }, 2500);
-    return () => clearInterval(interval);
-  }, [selectedSymbol]);
-
-  // 3. ValidaÃ§Ã£o do Gateway Seguro de Corretora
-  const syncGatewayConnection = async () => {
+  // 3. Consulta de Saldo Real Verdadeiro na Corretora (Sem inventar valores)
+  const syncTrueBrokerBalance = async () => {
     try {
       const res = await fetch("/api/capital-session", {
         method: "POST",
@@ -112,15 +104,23 @@ export default function AstraTerminal() {
         body: JSON.stringify({ isDemo: isDemoMode }),
       });
       const data = await res.json();
-      if (data.success) {
-        setIsGatewayConnected(true);
+      if (data.success && data.account) {
+        setBrokerBalanceReal(data.account.balance || 0.00);
+        setBrokerCurrency(data.account.currency || "BRL");
       }
     } catch (e) {}
   };
 
   useEffect(() => {
-    syncGatewayConnection();
-  }, [isDemoMode]);
+    fetchScreener();
+    fetchDepth();
+    syncTrueBrokerBalance();
+    const interval = setInterval(() => {
+      fetchScreener();
+      fetchDepth();
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [selectedSymbol, isDemoMode]);
 
   // 4. LOOP DE EXECUÃ‡ÃƒO AUTÃ”NOMA DO ROBÃ”
   const isRunningRef = useRef(isBotRunning);
@@ -241,12 +241,12 @@ export default function AstraTerminal() {
           </div>
         </div>
 
-        {/* Rastreador de Saldo e Meta DiÃ¡ria */}
+        {/* Rastreador de Saldo da SessÃ£o e Meta */}
         <div className="flex items-center gap-3 font-mono">
           
           <div className="hidden sm:flex items-center gap-3 bg-[#080d1c] border border-cyan-900/30 rounded-lg px-3.5 py-1.5">
             <div>
-              <span className="text-[9px] text-slate-400 block font-sans font-semibold">SALDO ATUAL</span>
+              <span className="text-[9px] text-slate-400 block font-sans font-semibold">SALDO DA SESSÃƒO</span>
               <span className="text-sm font-bold text-white">R$ {currentCapital.toFixed(2)}</span>
             </div>
             <div className="h-6 w-px bg-slate-800" />
@@ -467,18 +467,18 @@ export default function AstraTerminal() {
           </div>
         </div>
 
-        {/* COLUNA DIREITA: GESTÃƒO DO CAPITAL DE R$ 30 & SEGURANÃ‡A INSTITUCIONAL (3 COLUNAS) */}
+        {/* COLUNA DIREITA: GESTÃƒO DO CAPITAL DE R$ 30 & SALDO REAL DA CORRETORA (3 COLUNAS) */}
         <div className="lg:col-span-3 flex flex-col gap-4">
           
           {/* Painel do Capital Real Depositado (R$ 30) */}
           <div className="bg-[#050814] border border-cyan-900/40 rounded-xl p-4 shadow-xl space-y-3.5">
             <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
               <Coins className="w-3.5 h-3.5 text-cyan-400" />
-              GestÃ£o de DepÃ³sito
+              Capital Alocado para o RobÃ´
             </span>
 
             <div className="space-y-2">
-              <label className="text-[10px] text-slate-400 uppercase font-semibold block">Capital Inicial</label>
+              <label className="text-[10px] text-slate-400 uppercase font-semibold block">Valor Alocado (R$)</label>
               <div className="relative">
                 <span className="absolute left-3 top-2.5 text-xs text-slate-400 font-bold">R$</span>
                 <input
@@ -493,13 +493,13 @@ export default function AstraTerminal() {
                 />
               </div>
               <p className="text-[9px] text-slate-500">
-                Ordens micro-scalp calculadas automaticamente para preservar sua margem.
+                O robÃ´ dimensiona os micro-lotes para este valor alocado.
               </p>
             </div>
 
             {/* Meta DiÃ¡ria */}
             <div className="pt-2 border-t border-slate-800">
-              <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-2">Meta de Lucro:</span>
+              <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-2">Meta de Lucro do Dia:</span>
               <div className="grid grid-cols-3 gap-1.5 font-mono text-xs font-bold">
                 {[20, 25, 30].map((v) => (
                   <button
@@ -518,12 +518,12 @@ export default function AstraTerminal() {
             </div>
           </div>
 
-          {/* Painel Seguro Institucional: Chaves 100% Protegidas no Servidor */}
+          {/* Saldo Real e Auditoria da Corretora Capital.com */}
           <div className="bg-[#050814] border border-cyan-900/40 rounded-xl p-4 shadow-xl space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
                 <LockKeyhole className="w-3.5 h-3.5 text-emerald-400" />
-                SeguranÃ§a Institucional
+                Saldo na Capital.com
               </span>
               <button
                 onClick={() => setIsDemoMode(!isDemoMode)}
@@ -531,49 +531,36 @@ export default function AstraTerminal() {
                   !isDemoMode ? "bg-emerald-500 text-slate-950 font-black" : "bg-amber-500/20 text-amber-300"
                 }`}
               >
-                {!isDemoMode ? "ðŸŸ¢ CONTA REAL" : "ðŸŸ¡ DEMO"}
+                {!isDemoMode ? "ðŸŸ¢ CONTA REAL" : "ðŸŸ¡ CONTA DEMO"}
               </button>
             </div>
 
-            <div className="p-3 rounded-lg bg-emerald-950/20 border border-emerald-500/30 space-y-2 font-mono text-xs">
+            <div className="p-3 rounded-lg bg-[#090e1f] border border-slate-800 space-y-2 font-mono text-xs">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-emerald-400 font-bold">
-                  <ShieldCheck className="w-4 h-4" />
-                  <span>GATEWAY PROTEGIDO</span>
-                </div>
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-900/60 text-emerald-300">
-                  SERVER-SIDE
+                <span className="text-slate-400 text-[11px]">Saldo em Conta Real:</span>
+                <span className="text-sm font-bold text-white font-mono">
+                  {brokerCurrency} {brokerBalanceReal.toFixed(2)}
                 </span>
               </div>
-              
-              <div className="space-y-1.5 pt-1 border-t border-emerald-900/40 text-[11px]">
-                <div className="flex justify-between text-slate-300">
-                  <span className="text-slate-400">Credenciais API:</span>
-                  <span className="text-emerald-400 font-bold flex items-center gap-1">
-                    <Check className="w-3 h-3" /> Blindadas no Servidor
-                  </span>
-                </div>
-                <div className="flex justify-between text-slate-300">
-                  <span className="text-slate-400">Vazamento de Chave:</span>
-                  <span className="text-emerald-400 font-bold">Zero (InvisÃ­vel no Client)</span>
-                </div>
-                <div className="flex justify-between text-slate-300">
-                  <span className="text-slate-400">Criptografia:</span>
-                  <span className="text-cyan-300 font-bold">TLS 1.3 / OpenAPI v1</span>
-                </div>
+              <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-800">
+                <span>DisponÃ­vel para saque:</span>
+                <span className="text-slate-300 font-bold">{brokerCurrency} {brokerBalanceReal.toFixed(2)}</span>
               </div>
             </div>
 
-            <p className="text-[10px] text-slate-500 leading-tight">
-              Nenhuma chave de API ou credencial sensÃ­vel Ã© exposta no frontend. Toda comunicaÃ§Ã£o ocorre no servidor.
-            </p>
+            <div className="p-2.5 rounded-lg bg-amber-950/20 border border-amber-500/30 flex items-start gap-2 text-[10px] text-amber-200/80 leading-relaxed">
+              <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <span>
+                Seu saldo real na Capital.com estÃ¡ em <strong>R$ 0,00</strong>. Quando vocÃª fizer o depÃ³sito na corretora, o valor exato aparecerÃ¡ aqui automaticamente.
+              </span>
+            </div>
           </div>
 
-          {/* HistÃ³rico de Ordens Reais da SessÃ£o */}
+          {/* HistÃ³rico de Ordens da SessÃ£o */}
           <div className="bg-[#050814] border border-slate-800/80 rounded-xl p-4 flex-1 flex flex-col shadow-xl">
             <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5 mb-2">
               <Activity className="w-3.5 h-3.5 text-emerald-400" />
-              Ordens ConcluÃ­das ({executedTrades.length})
+              Ordens da SessÃ£o ({executedTrades.length})
             </span>
 
             <div className="space-y-1.5 overflow-y-auto max-h-[160px] font-mono text-[10px] pr-1">
