@@ -6,12 +6,12 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     const {
-      apiKey = "sM7ZGP4ElOFbXMs7",
+      apiKey = process.env.CAPITAL_API_KEY || "sM7ZGP4ElOFbXMs7",
       cstToken,
       securityToken,
       identifier = process.env.CAPITAL_EMAIL || "",
       password = process.env.CAPITAL_PASSWORD || "",
-      isDemo = true,
+      isDemo = false,
     } = body;
 
     const baseUrl = isDemo
@@ -21,40 +21,28 @@ export async function POST(req: Request) {
     let activeCst = cstToken;
     let activeSec = securityToken;
 
-    // 1. Se o usuÃ¡rio jÃ¡ tiver os tokens de sessÃ£o da API ou se tiver as credenciais no .env
+    // Se nÃ£o hÃ¡ credenciais de sessÃ£o ativas na corretora
     if (!activeCst || !activeSec) {
       if (!identifier || !password) {
-        // Modo API Direct Key (Handshake Standby de API)
-        // Valida se a API Key tem comunicaÃ§Ã£o com o gateway da corretora
-        const pingRes = await fetch(`${baseUrl}/ping`, {
-          headers: { "X-CAP-API-KEY": apiKey },
-          signal: AbortSignal.timeout(5000),
-        }).catch(() => null);
-
+        // Retorna status honesto de conta vazia / nÃ£o autenticada com dinheiro real
         return NextResponse.json({
           success: true,
           mode: isDemo ? "CAPITAL_DEMO" : "CAPITAL_REAL",
-          connected: true,
-          connectionType: "DIRECT_API_KEY",
-          apiKey: `${apiKey.slice(0, 4)}â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢${apiKey.slice(-4)}`,
+          authenticated: false,
           account: {
-            accountId: "API_GATEWAY_SESSION",
-            accountName: "Mesa Quant OpenAPI",
-            currency: "USD",
-            balance: 50.00,
-            available: 50.00,
-            deposit: 50.00,
+            accountId: null,
+            accountName: isDemo ? "Conta DemonstraÃ§Ã£o (Sem VÃ­nculo)" : "Conta Real NÃ£o Autenticada",
+            currency: "BRL",
+            balance: 0.00,
+            available: 0.00,
+            deposit: 0.00,
             profitLoss: 0.00,
           },
-          tokens: {
-            cst: "AUTO_GENERATED_API_SESSION",
-            securityToken: "AUTO_GENERATED_SEC_TOKEN",
-          },
-          message: "ConexÃ£o direta estabelecida via API Key da Capital.com (OpenAPI Gateway Ativo).",
+          message: "Nenhum saldo real detectado na Capital.com. Para carregar seu saldo exato, autentique a sessÃ£o.",
         });
       }
 
-      // AutenticaÃ§Ã£o completa via OpenAPI
+      // AutenticaÃ§Ã£o na Capital.com
       const sessionRes = await fetch(`${baseUrl}/session`, {
         method: "POST",
         headers: {
@@ -65,14 +53,26 @@ export async function POST(req: Request) {
         signal: AbortSignal.timeout(8000),
       });
 
-      if (sessionRes.ok) {
-        activeCst = sessionRes.headers.get("CST");
-        activeSec = sessionRes.headers.get("X-SECURITY-TOKEN");
+      if (!sessionRes.ok) {
+        return NextResponse.json({
+          success: false,
+          mode: isDemo ? "CAPITAL_DEMO" : "CAPITAL_REAL",
+          authenticated: false,
+          error: "Falha ao autenticar com a Capital.com. Credenciais incorretas ou conta vazia.",
+          account: {
+            balance: 0.00,
+            available: 0.00,
+            currency: "BRL",
+          },
+        }, { status: 401 });
       }
+
+      activeCst = sessionRes.headers.get("CST");
+      activeSec = sessionRes.headers.get("X-SECURITY-TOKEN");
     }
 
-    // 2. Consulta de Contas na Corretora
-    if (activeCst && activeSec && activeCst !== "AUTO_GENERATED_API_SESSION") {
+    // Consulta de Contas na Corretora com Saldo Real
+    if (activeCst && activeSec) {
       const accountsRes = await fetch(`${baseUrl}/accounts`, {
         headers: {
           "X-CAP-API-KEY": apiKey,
@@ -88,16 +88,15 @@ export async function POST(req: Request) {
         return NextResponse.json({
           success: true,
           mode: isDemo ? "CAPITAL_DEMO" : "CAPITAL_REAL",
-          connected: true,
-          connectionType: "OPENAPI_AUTHENTICATED",
+          authenticated: true,
           account: {
             accountId: primaryAccount?.accountId,
-            accountName: primaryAccount?.accountName,
-            currency: primaryAccount?.currency || "USD",
-            balance: primaryAccount?.balance?.balance || 0,
-            available: primaryAccount?.balance?.available || 0,
-            deposit: primaryAccount?.balance?.deposit || 0,
-            profitLoss: primaryAccount?.balance?.profitLoss || 0,
+            accountName: primaryAccount?.accountName || "Conta Capital.com",
+            currency: primaryAccount?.currency || "BRL",
+            balance: primaryAccount?.balance?.balance || 0.00,
+            available: primaryAccount?.balance?.available || 0.00,
+            deposit: primaryAccount?.balance?.deposit || 0.00,
+            profitLoss: primaryAccount?.balance?.profitLoss || 0.00,
           },
           tokens: {
             cst: activeCst,
@@ -107,25 +106,18 @@ export async function POST(req: Request) {
       }
     }
 
-    // Fallback ConexÃ£o Direta API Key
     return NextResponse.json({
       success: true,
       mode: isDemo ? "CAPITAL_DEMO" : "CAPITAL_REAL",
-      connected: true,
-      connectionType: "DIRECT_API_KEY",
-      apiKey: `${apiKey.slice(0, 4)}â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢${apiKey.slice(-4)}`,
+      authenticated: false,
       account: {
-        accountId: "CAPITAL_API_ACTIVE",
-        accountName: "OpenAPI Live Desk",
-        currency: "USD",
-        balance: 50.00,
-        available: 50.00,
-        deposit: 50.00,
+        accountId: null,
+        accountName: "Conta Real",
+        currency: "BRL",
+        balance: 0.00,
+        available: 0.00,
+        deposit: 0.00,
         profitLoss: 0.00,
-      },
-      tokens: {
-        cst: "API_DIRECT_TOKEN",
-        securityToken: "API_DIRECT_SEC_TOKEN",
       },
     });
   } catch (err: any) {
